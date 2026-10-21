@@ -1,0 +1,75 @@
+name: TestFlight
+
+# This private repo's personal GoldenPad: built on GitHub's Mac runner from my
+# own US GoldenEye 007 ROM, signed with Apple's cloud signing and uploaded to
+# TestFlight for internal testing only (.github/scripts/testflight.sh). The ROM
+# arrives encrypted (release asset `rom-input`, key in the ROM_KEY secret), is
+# decrypted only inside the runner, and nothing derived from it is cached or
+# kept as an artifact. Runs only when started by hand.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    name: Build, sign and upload to TestFlight
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      GOLDENPAD_BUNDLE_ID: com.lasmith1689.goldenpad
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Pick the newest Xcode 26 and free disk space
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          echo "Using $xcode"
+          # (GoldenPad needs about 20 GB; drop what this job never uses)
+          for other in /Applications/Xcode_*.app; do
+            [ "$other" = "$xcode" ] || sudo rm -rf "$other" &
+          done
+          sudo rm -rf "${ANDROID_HOME:-/nonexistent}" "$HOME/.dotnet" /usr/local/share/dotnet &
+          wait
+          df -h /
+      - name: Install build tools
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          brew install cmake ninja xdelta sdl2 llvm lld
+          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/opt/lld/bin" >> "$GITHUB_PATH"
+          xcodebuild -downloadComponent MetalToolchain
+      - name: Decrypt my ROM inside the runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROM_KEY: ${{ secrets.ROM_KEY }}
+        run: |
+          [ -n "$ROM_KEY" ] || { echo "::error::Add the ROM_KEY secret first."; exit 1; }
+          mkdir -p "$RUNNER_TEMP/rom"
+          gh release download rom-input -R "$GITHUB_REPOSITORY" -p rom.z64.enc -D "$RUNNER_TEMP/rom"
+          /opt/homebrew/opt/openssl@3/bin/openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 \
+            -pass env:ROM_KEY -in "$RUNNER_TEMP/rom/rom.z64.enc" -out "$RUNNER_TEMP/rom/GoldenEye.z64"
+          rm -f "$RUNNER_TEMP/rom/rom.z64.enc"
+      - name: Build, sign and upload
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          CMAKE_BUILD_PARALLEL_LEVEL: '3'
+        # (the build number: run × 10 + attempt, growing with every upload and every re-run)
+        run: BUILD_NUMBER=$((GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT)) bash .github/scripts/testflight.sh "$RUNNER_TEMP/rom/GoldenEye.z64"
+      - name: Remove the ROM and everything built from it
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/rom" "$RUNNER_TEMP/testflight" build-personal build-maintained-ios dist
+          df -h /

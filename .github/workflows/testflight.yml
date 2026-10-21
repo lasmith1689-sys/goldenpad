@@ -30,12 +30,16 @@ jobs:
           persist-credentials: false
       - name: Pick the newest Xcode 26 and free disk space
         run: |
-          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)
+          # (several Xcode_*.app names are symlinks to one install: compare real paths)
+          ls -la /Applications | grep -i xcode || true
+          xcode=$(for x in /Applications/Xcode_26*.app; do [ -L "$x" ] || echo "$x"; done | sort -V | tail -n 1)
+          xcode=$(cd "$xcode" && pwd -P)
           echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
           echo "Using $xcode"
           # (GoldenPad needs about 20 GB; drop what this job never uses)
-          for other in /Applications/Xcode_*.app; do
-            [ "$other" = "$xcode" ] || sudo rm -rf "$other" &
+          for other in /Applications/Xcode*.app; do
+            [ -L "$other" ] && continue
+            [ "$(cd "$other" && pwd -P)" = "$xcode" ] || sudo rm -rf "$other" &
           done
           sudo rm -rf "${ANDROID_HOME:-/nonexistent}" "$HOME/.dotnet" /usr/local/share/dotnet &
           wait

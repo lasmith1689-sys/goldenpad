@@ -414,6 +414,7 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
                 "recomp_get_camera_inputs"
                 "goldenpad_recomp_mouse_camera_aim_active"
                 "goldenpad_recomp_textured_sky_enabled"
+                "goldenpad_recomp_set_rumble_motor"
                 "goldenpad_recomp_consume_crouch_toggle"
                 "goldenpad_recomp_consume_inventory_slot"
                 "goldenpad_recomp_consume_reload"

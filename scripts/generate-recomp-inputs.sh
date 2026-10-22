@@ -47,7 +47,14 @@ cp "$rom" "$output/ge007.tlbfree.z64"
 python3 "$output/tools_weaken_patched.py"
 "$tools/RSPRecomp" "$output/aspMain.us.toml"
 make -C "$output/patches" CC="$GOLDENPAD_MIPS_CC" LD="$GOLDENPAD_MIPS_LD"
-"$tools/N64Recomp" "$output/patches.toml"
+# N64Recomp reports an unknown patch symbol but still exits 0 with no
+# functions, which only surfaces later as missing bridges; stop here instead.
+"$tools/N64Recomp" "$output/patches.toml" 2>&1 | tee "$output/patches-recomp.log"
+if grep -q 'Undefined symbol' "$output/patches-recomp.log" ||
+   grep -q '^Function count: 0$' "$output/patches-recomp.log"; then
+  echo "::error::Game patch recompilation failed; see the Undefined symbol line above." >&2
+  exit 1
+fi
 xcrun clang++ -std=c++17 -O2 "$repo_root/vendor/rt64-ios/src/tools/file_to_c/file_to_c.cpp" -o "$tools/file_to_c"
 "$tools/file_to_c" "$output/patches/patches.bin" mm_patches_bin "$output/RecompiledPatches/patches_bin.c" "$output/RecompiledPatches/patches_bin.h"
 printf 'Private generated inputs: %s\n' "$output"

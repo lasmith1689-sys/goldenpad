@@ -2584,6 +2584,14 @@ extern "C" void goldenpad_recomp_textured_sky_enabled(uint8_t *, recomp_context 
     ctx->r2 = texturedSky.load(std::memory_order_relaxed) ? 1 : 0;
 }
 
+// Called by the personal joyRumblePakTick patch whenever GoldenEye turns a
+// controller's Rumble Pak motor on or off; the iOS host polls it for haptics.
+extern "C" void goldenpad_recomp_set_rumble_motor(uint8_t *rdram, recomp_context *ctx) {
+    const int32_t controllerNum = _arg<0, int32_t>(rdram, ctx);
+    const int32_t on = _arg<1, int32_t>(rdram, ctx);
+    setRumble(controllerNum, on != 0);
+}
+
 extern "C" void goldenpad_recomp_set_textured_sky(int32_t enabled) {
     const bool next = enabled != 0;
     if (texturedSky.exchange(next, std::memory_order_relaxed) != next) {

@@ -11,8 +11,8 @@ diff -ru a/patches/patches.h b/patches/patches.h
  s32 goldenpad_recomp_consume_return_to_title(void);
 diff -ru a/patches/skybox.c b/patches/skybox.c
 --- a/patches/skybox.c	2026-10-22 17:41:51.793333800 -0400
-+++ b/patches/skybox.c	2026-10-22 17:45:54.245908900 -0400
-@@ -2,25 +2,28 @@
++++ b/patches/skybox.c	2026-10-22 17:57:44.422239500 -0400
+@@ -2,25 +2,30 @@
  #include "gbi_extension.h"
  
  #if 1
@@ -31,6 +31,8 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +/* One 64-texel cloud tile in S10.5 units; folding S/T by whole tiles keeps
 + * them in s16 range without moving the texture. */
 +#define GOLDENPAD_SKY_TC_WRAP 2048.0f
++
++Vtx* dynAllocateVertices(s32 count);
 +
 +static Gfx* goldenpadSkyFill(Gfx* gdl) {
      u32 left = viGetViewLeft();
@@ -54,7 +56,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
      gDPPipeSync(gdl++);
      gDPSetCycleType(gdl++, G_CYC_FILL);
      gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
-@@ -37,41 +40,176 @@
+@@ -37,41 +42,176 @@
      return gdl;
  }
  
@@ -169,7 +171,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    foldS = goldenpadSkyFloorTiles(foldS);
 +    foldT = goldenpadSkyFloorTiles(foldT);
 +
-+    verts = (Vtx*) dynAllocate7F0BD6C4(n);
++    verts = dynAllocateVertices(n);
 +    proj = dynAllocateMatrix();
 +    ident = dynAllocateMatrix();
 +
@@ -258,23 +260,54 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
  #define PORTSKY 1
 diff -ru a/patches/syms.ld b/patches/syms.ld
 --- a/patches/syms.ld	2026-10-22 17:41:52.637935200 -0400
-+++ b/patches/syms.ld	2026-10-22 17:42:10.314152500 -0400
-@@ -85,3 +85,4 @@
++++ b/patches/syms.ld	2026-10-22 17:57:44.422239500 -0400
+@@ -85,3 +85,5 @@
  goldenpad_recomp_consume_reload = 0x8F000128;
  goldenpad_recomp_consume_inventory_slot = 0x8F00012C;
  goldenpad_recomp_mouse_camera_aim_active = 0x8F000130;
 +goldenpad_recomp_textured_sky_enabled = 0x8F000134;
++goldenpad_recomp_set_rumble_motor = 0x8F000138;
 diff -ru a/patches/widescreen.c b/patches/widescreen.c
 --- a/patches/widescreen.c	2026-10-22 17:41:51.798153100 -0400
-+++ b/patches/widescreen.c	2026-10-22 17:42:18.969927200 -0400
-@@ -530,5 +530,10 @@
- 
++++ b/patches/widescreen.c	2026-10-22 17:57:44.421235900 -0400
+@@ -531,4 +531,40 @@
      // @recomp: force rumble pak plugged in.
      g_ContRumblePakInitState[index] = 1;
-+    // GoldenPad: also initialize the motor so osMotorStart/Stop reach the
-+    // host's set_rumble callback (the runtime ignores an uninitialized pak).
-+    // The host reports a Rumble Pak on port 1 only; other ports fail here
-+    // harmlessly and stay silent.
-+    osMotorInit_recomp(&g_ContInputMessageQueue, &g_ContPfs[index], index);
  }
++
++/* GoldenPad: the forced-ready pak above never ran osMotorInit, so the
++ * runtime rejected every osMotorStart/Stop and rumble never reached the host.
++ * Same state machine as the original joyRumblePakTick (US build), but motor
++ * changes go straight to the host, which mirrors them on controller haptics. */
++extern s32 g_ContRumblePakCurrentState[4];
++extern s32 g_ContRumblePakTimer60[4];
++extern s32 g_ContRumblePakTargetState[4];
++void goldenpad_recomp_set_rumble_motor(s32 index, s32 on);
++
++RECOMP_PATCH void joyRumblePakTick(void) {
++    s32 i;
++
++    for (i = 0; i < 4; i++) {
++        if (g_ContRumblePakCurrentState[i] != g_ContRumblePakTargetState[i]) {
++            /* RUMBLEPAKSTATE_OFF = 0, _ON = 1, _UNKNOWN = 2 */
++            if (g_ContRumblePakTargetState[i] == 1) {
++                goldenpad_recomp_set_rumble_motor(i, 1);
++                g_ContRumblePakCurrentState[i] = 1;
++            } else {
++                goldenpad_recomp_set_rumble_motor(i, 0);
++                g_ContRumblePakCurrentState[i] = 0;
++            }
++        }
++
++        if (g_ContRumblePakTimer60[i] <= 0) {
++            g_ContRumblePakTimer60[i] = 0;
++        } else {
++            g_ContRumblePakTimer60[i]--;
++            if (g_ContRumblePakTimer60[i] <= 0) {
++                g_ContRumblePakTimer60[i] = 0;
++                g_ContRumblePakTargetState[i] = 0;
++            }
++        }
++    }
++}
  #endif

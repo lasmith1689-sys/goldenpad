@@ -38,7 +38,8 @@ The build takes much longer than Glass Rail (the ROM's code is translated and th
 compiled from source). Apple then processes the build, usually within 5 to 30 minutes, and
 TestFlight on the iPhone offers it. Each build number is `<run number> × 10 + <attempt>`.
 
-On first launch, pick the same ROM in the app (Files): the app imports it into its private storage.
+The build puts the ROM inside the app (`GoldenEye_retail.z64`), so on first launch GoldenPad
+imports it by itself and opens straight into the game, with no ROM picker.
 
 ## Updating from upstream
 

@@ -69,9 +69,20 @@ final class RecompPrototypeROMStore: ObservableObject {
         }
     }
 
+    // A personal build may carry the owner's own retail ROM in the app bundle
+    // (lasmith1689's TestFlight build adds it after packaging); when present it
+    // is imported automatically, so the app opens straight into the game.
+    private var bundledROMURL: URL? {
+        Bundle.main.url(forResource: "GoldenEye_retail", withExtension: "z64")
+    }
+
     private func refresh() {
         guard fileManager.fileExists(atPath: destinationURL.path) else {
-            state = .needsROM
+            if let bundledROMURL {
+                importROM(from: bundledROMURL)
+            } else {
+                state = .needsROM
+            }
             return
         }
         state = .checking
@@ -86,6 +97,8 @@ final class RecompPrototypeROMStore: ObservableObject {
             } else if let pendingOpenURL {
                 self.pendingOpenURL = nil
                 importROM(from: pendingOpenURL)
+            } else if let bundledROMURL {
+                importROM(from: bundledROMURL)
             } else {
                 state = .failed("GoldenPad couldn't verify the game copy stored on this device. Choose your original NTSC-U GoldenEye 007 ROM to recreate it. Your original file will not be changed.")
             }

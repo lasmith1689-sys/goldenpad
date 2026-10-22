@@ -51,6 +51,12 @@ plutil -replace DTCompiler -string com.apple.compilers.llvm.clang.1_0 "$info"
 plutil -replace BuildMachineOSBuild -string "$(sw_vers -buildVersion)" "$info"
 # (TLS from the system only: exempt)
 plutil -replace ITSAppUsesNonExemptEncryption -bool NO "$info"
+# my own ROM goes inside this personal app, so it opens straight into the game with no ROM picker
+# (RecompPrototypeROMStore imports GoldenEye_retail.z64 from the bundle on first launch)
+retail=build-personal/GoldenEye_retail.z64
+[ "$(shasum -a 1 "$retail" | awk '{print $1}')" = abe01e4aeb033b6c0836819f549c791b26cfde83 ] || {
+  echo "::error::The normalized ROM from the personal build is missing or not the US retail dump."; exit 1; }
+cp "$retail" "$APP/GoldenEye_retail.z64"
 # the packager strips signatures; sign ad-hoc again over the new Info.plist (GoldenPad needs no entitlements)
 codesign --force --deep --sign - "$APP"
 plutil -p "$info" | grep -E '"CFBundleIdentifier"|"CFBundleShortVersionString"|"CFBundleVersion"|"MinimumOSVersion"|"DTSDKName"|"DTXcode"' || true

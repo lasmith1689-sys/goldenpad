@@ -210,16 +210,12 @@ struct GoldenPadApp: App {
             .onChange(of: controllerLookMode) { _, value in
                 input.configureControllerLookMode(value)
             }
-            .onChange(of: controllerLookSpeed) { _, value in
-                input.configureControllerLookSpeed(value)
-            }
-            .onChange(of: controllerTurnBoost) { _, value in
-                input.configureControllerTurnBoost(value)
-            }
-            .onChange(of: controllerRumble) { _, value in
-                input.configureControllerRumble(value)
-            }
-            .onChange(of: controllerMappingRawValues) { _, _ in
+            .onChange(of: controllerSettingsSignature) { _, _ in
+                // One handler for the mapping and controller-feel settings keeps
+                // this modifier chain small enough for the Swift type checker.
+                input.configureControllerLookSpeed(controllerLookSpeed)
+                input.configureControllerTurnBoost(controllerTurnBoost)
+                input.configureControllerRumble(controllerRumble)
                 input.configureControllerMapping(controllerMapping)
             }
             .onChange(of: invertAimY) { _, value in
@@ -503,6 +499,14 @@ struct GoldenPadApp: App {
         RecompPrototypeControllerControl.allCases.map {
             controllerMapping[$0] ?? $0.defaultAction.rawValue
         }
+    }
+
+    private var controllerSettingsSignature: [String] {
+        controllerMappingRawValues + [
+            String(controllerLookSpeed),
+            String(controllerTurnBoost),
+            String(controllerRumble),
+        ]
     }
 }
 

@@ -63,6 +63,7 @@ std::array<std::atomic<int32_t>, kControllerPorts> controllerLookY{};
 std::array<std::atomic<uint32_t>, kControllerPorts> controllerLookSamples{};
 std::array<std::atomic<uint32_t>, kControllerPorts> controllerButtonTransitions{};
 std::array<std::atomic<uint32_t>, kControllerPorts> controllerRumbleTransitions{};
+std::array<std::atomic<bool>, kControllerPorts> controllerRumbleOn{};
 std::array<std::atomic<int32_t>, kControllerPorts> queuedTouchLookX{};
 std::array<std::atomic<int32_t>, kControllerPorts> queuedTouchLookY{};
 std::array<std::atomic<int64_t>, kControllerPorts> queuedMouseLookX{};
@@ -1533,9 +1534,10 @@ bool getInput(int controllerNum, uint16_t *buttons, float *x, float *y) {
 }
 void setRumble(int controllerNum, bool enabled) {
     if (controllerNum >= 0 && controllerNum < static_cast<int>(kControllerPorts)) {
+        controllerRumbleOn[controllerNum].store(enabled, std::memory_order_relaxed);
         const uint32_t transition = controllerRumbleTransitions[controllerNum].fetch_add(1) + 1;
         if (transition <= 4 || transition % 60 == 0) {
-            logEvent("input", "controller %d rumble %s (not implemented; sampled transition %u)",
+            logEvent("input", "controller %d rumble %s (sampled transition %u)",
                 controllerNum + 1, enabled ? "requested" : "stopped", transition);
         }
     }
@@ -1552,7 +1554,15 @@ ultramodern::input::connected_device_info_t getConnectedDeviceInfo(int controlle
         if ((controllerPortsReported.fetch_or(reportBit) & reportBit) == 0) {
             logEvent("input", "advertising a normal controller in port %d", controllerNum + 1);
         }
-        return {ultramodern::input::Device::Controller, ultramodern::input::Pak::None};
+        // Port 1 carries a Rumble Pak in normal single-player play, so
+        // GoldenEye's own osMotorInit succeeds and its rumble reaches
+        // setRumble (the host mirrors it on controller haptics). Netplay and
+        // determinism probes keep the original empty slot.
+        const bool rumblePak = controllerNum == 0 &&
+            !netplayEnabled.load(std::memory_order_relaxed) &&
+            !determinismProbeEnabled.load(std::memory_order_relaxed);
+        return {ultramodern::input::Device::Controller,
+            rumblePak ? ultramodern::input::Pak::RumblePak : ultramodern::input::Pak::None};
     }
     return {ultramodern::input::Device::None, ultramodern::input::Pak::None};
 }
@@ -1719,8 +1729,11 @@ extern "C" void goldenpad_recomp_set_right_analog(int32_t controllerNum, int32_t
         return;
     }
     const size_t port = static_cast<size_t>(controllerNum);
-    const int32_t normalizedX = std::clamp(lookX, -32'767, 32'767);
-    const int32_t normalizedY = std::clamp(lookY, -32'767, 32'767);
+    // Full deflection is 32767. The iOS host may scale look up to 3.5x for its
+    // look-speed setting and full-tilt turn boost, so allow 4x headroom.
+    constexpr int32_t kControllerLookLimit = 4 * 32'767;
+    const int32_t normalizedX = std::clamp(lookX, -kControllerLookLimit, kControllerLookLimit);
+    const int32_t normalizedY = std::clamp(lookY, -kControllerLookLimit, kControllerLookLimit);
     const int32_t previousX = controllerLookX[port].exchange(normalizedX, std::memory_order_relaxed);
     const int32_t previousY = controllerLookY[port].exchange(normalizedY, std::memory_order_relaxed);
     const bool wasActive = std::abs(previousX) > 2'048 || std::abs(previousY) > 2'048;
@@ -1734,6 +1747,13 @@ extern "C" void goldenpad_recomp_set_right_analog(int32_t controllerNum, int32_t
         logEvent("input", "controller %d right stick sample (%d,%d)",
             controllerNum + 1, normalizedX, normalizedY);
     }
+}
+
+extern "C" int32_t goldenpad_recomp_get_rumble(int32_t controllerNum) {
+    if (controllerNum < 0 || controllerNum >= static_cast<int32_t>(kControllerPorts)) {
+        return 0;
+    }
+    return controllerRumbleOn[static_cast<size_t>(controllerNum)].load(std::memory_order_relaxed) ? 1 : 0;
 }
 
 extern "C" void goldenpad_recomp_set_controller_connected(int32_t connected) {

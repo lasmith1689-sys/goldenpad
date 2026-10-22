@@ -40,6 +40,9 @@ struct GoldenPadApp: App {
     @AppStorage("recomp.lookSensitivity") private var lookSensitivity = 4.0
     @AppStorage("recomp.aimBehavior") private var aimBehavior = RecompPrototypeAimBehavior.toggle.rawValue
     @AppStorage("recomp.controllerLookMode") private var controllerLookMode = RecompPrototypeControllerLookMode.analog.rawValue
+    @AppStorage("recomp.controllerLookSpeed") private var controllerLookSpeed = 1.0
+    @AppStorage("recomp.controllerTurnBoost") private var controllerTurnBoost = true
+    @AppStorage("recomp.controllerRumble") private var controllerRumble = true
     @AppStorage("recomp.controllerMap.buttonA") private var controllerButtonA = RecompPrototypeControllerControl.buttonA.defaultAction.rawValue
     @AppStorage("recomp.controllerMap.buttonB") private var controllerButtonB = RecompPrototypeControllerControl.buttonB.defaultAction.rawValue
     @AppStorage("recomp.controllerMap.buttonX") private var controllerButtonX = RecompPrototypeControllerControl.buttonX.defaultAction.rawValue
@@ -187,6 +190,9 @@ struct GoldenPadApp: App {
                 input.configureLookSensitivity(lookSensitivity)
                 input.configureAimBehavior(aimBehavior)
                 input.configureControllerLookMode(controllerLookMode)
+                input.configureControllerLookSpeed(controllerLookSpeed)
+                input.configureControllerTurnBoost(controllerTurnBoost)
+                input.configureControllerRumble(controllerRumble)
                 input.configureControllerMapping(controllerMapping)
                 input.configureInvertAimY(invertAimY)
                 input.configureUnlockAllMissions(unlockAllMissions)
@@ -203,6 +209,15 @@ struct GoldenPadApp: App {
             }
             .onChange(of: controllerLookMode) { _, value in
                 input.configureControllerLookMode(value)
+            }
+            .onChange(of: controllerLookSpeed) { _, value in
+                input.configureControllerLookSpeed(value)
+            }
+            .onChange(of: controllerTurnBoost) { _, value in
+                input.configureControllerTurnBoost(value)
+            }
+            .onChange(of: controllerRumble) { _, value in
+                input.configureControllerRumble(value)
             }
             .onChange(of: controllerMappingRawValues) { _, _ in
                 input.configureControllerMapping(controllerMapping)
@@ -276,6 +291,9 @@ struct GoldenPadApp: App {
                         ),
                         aimBehavior: $aimBehavior,
                         controllerLookMode: $controllerLookMode,
+                        controllerLookSpeed: $controllerLookSpeed,
+                        controllerTurnBoost: $controllerTurnBoost,
+                        controllerRumble: $controllerRumble,
                         controllerButtonA: $controllerButtonA,
                         controllerButtonB: $controllerButtonB,
                         controllerButtonX: $controllerButtonX,
@@ -632,6 +650,9 @@ private struct RecompPrototypeSettingsView: View {
     @Binding var lookSensitivity: Double
     @Binding var aimBehavior: String
     @Binding var controllerLookMode: String
+    @Binding var controllerLookSpeed: Double
+    @Binding var controllerTurnBoost: Bool
+    @Binding var controllerRumble: Bool
     @Binding var controllerButtonA: String
     @Binding var controllerButtonB: String
     @Binding var controllerButtonX: String
@@ -723,6 +744,20 @@ private struct RecompPrototypeSettingsView: View {
                             Text(mode.title).tag(mode.rawValue)
                         }
                     }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Controller look speed")
+                            Spacer()
+                            Text(String(format: "%.2f×", controllerLookSpeed))
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $controllerLookSpeed, in: 0.5...2.0, step: 0.05)
+                    }
+                    Toggle("Turn boost at full tilt", isOn: $controllerTurnBoost)
+                    Toggle("Rumble", isOn: $controllerRumble)
+                    Text("Aiming slows the right stick for precision. Turn boost speeds up turning when the right stick is held all the way over. Rumble follows GoldenEye's own Rumble Pak effects.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     NavigationLink {
                         RecompPrototypeControllerMappingView(
                             buttonA: $controllerButtonA,

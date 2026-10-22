@@ -53,3 +53,11 @@ imports it by itself and opens straight into the game, with no ROM picker.
 | "Check the API key…" | The key needs **Admin** access, and all three values must come from the same key. |
 | "That build number was already used" | Click **Re-run all jobs**. |
 | "bad decrypt" | `ROM_KEY` doesn't match the uploaded `rom.z64.enc`; re-encrypt and upload both again. |
+
+## Controller
+
+This build is tuned for a modern dual-stick controller (Xbox, PlayStation or MFi): left stick moves
+and strafes, right stick looks, RT fires, LT aims (the right stick keeps turning the view at 0.6×
+while aiming), A and LB use/open doors, X reloads, B crouches, Y and RB change weapon. GoldenEye's
+own Rumble Pak effects play on the controller. Settings ▸ Controller has look speed, full-tilt turn
+boost and rumble; Button mapping can reassign every face button, bumper and trigger.

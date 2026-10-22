@@ -119,7 +119,8 @@ for controller_aim_marker in \
   'let manualAimStick = externalMapping.manualAimStick(' \
   'stick: externalStick,' \
   'externalMovement.stick = manualAimStick' \
-  'publishedControllerLook = .zero'
+  'aiming: externalContext.aiming && !externalContext.isInTank' \
+  'return look * (controllerLookSpeed * 0.6)'
 do
   if ! grep -Fq "$controller_aim_marker" "$repo_root/Sources/RecompPrototypeInput.swift"; then
     echo "FAIL: native manual-aim routing is missing $controller_aim_marker" >&2
@@ -138,7 +139,7 @@ if grep -Fq 'if (aiming && !invertAimY.load(std::memory_order_relaxed)) {' \
   exit 1
 fi
 
-echo "PASS: external-controller on-foot Aim uses native manual-sight routing"
+echo "PASS: external-controller on-foot Aim uses native manual-sight routing with 0.6x right-stick view turning"
 
 if ! grep -Fq 'constexpr float kControllerHipDegreesPerFrame = 1.872f;' \
   "$repo_root/Support/RecompPrototype/recomp_game_start.cpp"; then

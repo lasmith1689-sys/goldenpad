@@ -1,5 +1,7 @@
+import CoreHaptics
 import Foundation
 import GameController
+import QuartzCore
 import SwiftUI
 import simd
 
@@ -31,6 +33,12 @@ private func goldenPadRecompQueueTouchLook(_ controller: Int32, _ x: Int32, _ y:
 
 @_silgen_name("goldenpad_recomp_request_crouch_toggle")
 private func goldenPadRecompRequestCrouchToggle(_ controller: Int32)
+
+@_silgen_name("goldenpad_recomp_request_reload")
+private func goldenPadRecompRequestReload(_ controller: Int32)
+
+@_silgen_name("goldenpad_recomp_get_rumble")
+private func goldenPadRecompGetRumble(_ controller: Int32) -> Int32
 
 @_silgen_name("goldenpad_recomp_set_invert_aim_y")
 private func goldenPadRecompSetInvertAimY(_ enabled: Int32)
@@ -82,7 +90,7 @@ enum RecompPrototypeControllerLookMode: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .analog: "Modern analog (experimental)"
+        case .analog: "Modern dual-stick"
         case .classic: "Original N64 C-buttons"
         case .off: "Off"
         }
@@ -94,6 +102,7 @@ enum RecompPrototypeControllerAction: String, CaseIterable {
     case aim
     case action
     case weapon
+    case reload
     case duck
     case none
 
@@ -103,6 +112,7 @@ enum RecompPrototypeControllerAction: String, CaseIterable {
         case .aim: "Aim"
         case .action: "Action"
         case .weapon: "Change weapon"
+        case .reload: "Reload"
         case .duck: "Duck"
         case .none: "Unassigned"
         }
@@ -134,11 +144,15 @@ enum RecompPrototypeControllerControl: String, CaseIterable, Identifiable {
         }
     }
 
+    // A modern dual-stick shooter layout: triggers fire and aim, A uses,
+    // X reloads, B crouches, Y and RB change weapon, and LB uses so doors open
+    // without the right thumb leaving the look stick.
     var defaultAction: RecompPrototypeControllerAction {
         switch self {
-        case .buttonA, .buttonY, .rightShoulder: .weapon
-        case .buttonB, .buttonX: .action
-        case .leftShoulder: .duck
+        case .buttonA, .leftShoulder: .action
+        case .buttonB: .duck
+        case .buttonX: .reload
+        case .buttonY, .rightShoulder: .weapon
         case .leftTrigger: .aim
         case .rightTrigger: .fire
         }
@@ -304,6 +318,15 @@ final class RecompPrototypeInput: ObservableObject {
         ProcessInfo.processInfo.arguments.contains("--controller-ownership-probe") ||
         ProcessInfo.processInfo.arguments.contains("--four-player-render-probe")
     private var lookSensitivity: Float = 4.0
+    // Modern controller feel: a look-speed multiplier over the bridge's tuned
+    // 1.872 degree/frame baseline, a finer aim-down-sights speed, and a
+    // full-tilt turn boost like modern console shooters.
+    private var controllerLookSpeed: Float = 1.0
+    private var controllerTurnBoostEnabled = true
+    private var controllerRumbleEnabled = true
+    private var fullTiltStartedAt: CFTimeInterval?
+    private var controllerReloadWasPressed = false
+    private let controllerRumble = RecompControllerRumble()
     private var controller: GCController?
     private var controllerMapping = Dictionary(
         uniqueKeysWithValues: RecompPrototypeControllerControl.allCases.map { ($0, $0.defaultAction) }
@@ -378,6 +401,20 @@ final class RecompPrototypeInput: ObservableObject {
 
     func configureLookSensitivity(_ value: Double) {
         lookSensitivity = Float(min(max(value, 0.5), 8.0))
+    }
+
+    func configureControllerLookSpeed(_ value: Double) {
+        controllerLookSpeed = Float(min(max(value, 0.5), 2.0))
+    }
+
+    func configureControllerTurnBoost(_ enabled: Bool) {
+        controllerTurnBoostEnabled = enabled
+        fullTiltStartedAt = nil
+    }
+
+    func configureControllerRumble(_ enabled: Bool) {
+        controllerRumbleEnabled = enabled
+        if !enabled { controllerRumble.update(active: false) }
     }
 
     func configureAimBehavior(_ rawValue: String) {
@@ -559,6 +596,9 @@ final class RecompPrototypeInput: ObservableObject {
             controller = availableControllers.first
         }
         controllerCrouchWasPressed = false
+        controllerReloadWasPressed = false
+        fullTiltStartedAt = nil
+        controllerRumble.attach(controller)
         externalControllerName = controller.map { $0.vendorName ?? "External controller" }
         controllerRequiresNeutralRelease = ControllerActivationGuard.waitingForNeutral(
             current: controllerRequiresNeutralRelease,
@@ -575,9 +615,16 @@ final class RecompPrototypeInput: ObservableObject {
     private func publish() {
         if hostInputSuspended {
             touchLook = .zero
+            controllerRumble.update(active: false)
             publishNeutralControllers()
             return
         }
+        // GoldenEye drives its Rumble Pak motor on port 1; mirror it on the
+        // controller's haptics (the game pulses the motor to vary strength).
+        controllerRumble.update(
+            active: controllerRumbleEnabled && controller != nil &&
+                !(lanNetplay?.isPlaying ?? false) && goldenPadRecompGetRumble(0) != 0
+        )
 
         let queuedTouchLook = clamp(touchLook * lookSensitivity)
         touchLook = .zero
@@ -585,6 +632,8 @@ final class RecompPrototypeInput: ObservableObject {
         var externalStick = SIMD2<Float>.zero
         var controllerLook = SIMD2<Float>.zero
         var controllerCrouchIsPressed = false
+        var controllerReloadIsPressed = false
+        var rightStickFullTilt = false
         var externalFireActive = false
         var externalAimActive = false
         var externalActionActive = false
@@ -598,6 +647,7 @@ final class RecompPrototypeInput: ObservableObject {
             )
                 .applyingRadialDeadZone(0.15)
                 .applyingResponseCurve(1.5)
+            rightStickFullTilt = abs(gamepad.rightThumbstick.xAxis.value) >= 0.9
             let pressedControls: [(RecompPrototypeControllerControl, Bool)] = [
                 (.buttonA, gamepad.buttonA.isPressed),
                 (.buttonB, gamepad.buttonB.isPressed),
@@ -614,6 +664,7 @@ final class RecompPrototypeInput: ObservableObject {
                 case .aim: externalAimActive = true
                 case .action: externalActionActive = true
                 case .weapon: externalWeaponActive = true
+                case .reload: controllerReloadIsPressed = true
                 case .duck: controllerCrouchIsPressed = true
                 case .none: break
                 }
@@ -641,7 +692,8 @@ final class RecompPrototypeInput: ObservableObject {
             !externalActionActive && !externalWeaponActive &&
             simd_length(externalStick) <= 0.15 &&
             controllerLook == .zero &&
-            !controllerCrouchIsPressed
+            !controllerCrouchIsPressed &&
+            !controllerReloadIsPressed
         let wasWaitingForNeutral = controllerRequiresNeutralRelease
         controllerRequiresNeutralRelease = ControllerActivationGuard.waitingForNeutral(
             current: controllerRequiresNeutralRelease,
@@ -657,6 +709,8 @@ final class RecompPrototypeInput: ObservableObject {
             externalStick = .zero
             controllerLook = .zero
             controllerCrouchIsPressed = false
+            controllerReloadIsPressed = false
+            rightStickFullTilt = false
             externalFireActive = false
             externalAimActive = false
             externalActionActive = false
@@ -672,6 +726,13 @@ final class RecompPrototypeInput: ObservableObject {
             }
         }
         controllerCrouchWasPressed = controllerCrouchIsPressed
+        if controllerReloadIsPressed && !controllerReloadWasPressed,
+           !(lanNetplay?.isPlaying ?? false) {
+            // The game patch reloads both hands on its next gameplay tick and
+            // ignores the request outside gameplay or behind the watch.
+            goldenPadRecompRequestReload(0)
+        }
+        controllerReloadWasPressed = controllerReloadIsPressed
 
         switch controllerLookMode {
         case .analog:
@@ -767,6 +828,13 @@ final class RecompPrototypeInput: ObservableObject {
             context: externalContext
         )
         var publishedControllerLook = controllerLook
+        if controllerLookMode == .analog {
+            publishedControllerLook = shapedControllerLook(
+                controllerLook,
+                fullTilt: rightStickFullTilt,
+                aiming: externalContext.aiming && !externalContext.isInTank
+            )
+        }
         if controllerLookMode == .analog,
            let manualAimStick = externalMapping.manualAimStick(
                stick: externalStick,
@@ -774,9 +842,10 @@ final class RecompPrototypeInput: ObservableObject {
                context: externalContext) {
             // GoldenEye's original manual-sight path owns damping, reticle
             // position, and weapon orientation. Aim mode interprets this N64
-            // stick as sight movement rather than character movement.
+            // stick as sight movement rather than character movement. The
+            // right stick keeps turning the view (modern aim-down-sights);
+            // the bridge already holds Aim look to the hip-fire response.
             externalMovement.stick = manualAimStick
-            publishedControllerLook = .zero
         }
         let mappedTouchMovement = touchMapping.movement(
             buttons: resolvedTouchButtons,
@@ -808,6 +877,36 @@ final class RecompPrototypeInput: ObservableObject {
         if queuedTouchLook != .zero, let touchPort = route.touchPort {
             publishTouchLook(queuedTouchLook, port: touchPort)
         }
+    }
+
+    /// Scales the dead-zoned, curved right stick for gameplay. Aiming uses a
+    /// finer 0.6× speed. Otherwise, holding the stick at full horizontal tilt
+    /// for 0.12 s ramps turning up to 1.75× over the next 0.3 s, so quick
+    /// 180s feel like a modern console shooter while small moves stay precise.
+    private func shapedControllerLook(
+        _ look: SIMD2<Float>,
+        fullTilt: Bool,
+        aiming: Bool
+    ) -> SIMD2<Float> {
+        guard look != .zero else {
+            fullTiltStartedAt = nil
+            return .zero
+        }
+        if aiming {
+            fullTiltStartedAt = nil
+            return look * (controllerLookSpeed * 0.6)
+        }
+        var boost: Float = 1
+        if controllerTurnBoostEnabled && fullTilt {
+            let now = CACurrentMediaTime()
+            let started = fullTiltStartedAt ?? now
+            fullTiltStartedAt = started
+            let ramp = (Float(now - started) - 0.12) / 0.30
+            boost = 1 + 0.75 * min(max(ramp, 0), 1)
+        } else {
+            fullTiltStartedAt = nil
+        }
+        return SIMD2(look.x * controllerLookSpeed * boost, look.y * controllerLookSpeed)
     }
 
     private var inactiveInputContext: RecompRuntimeInputContext {
@@ -1061,6 +1160,97 @@ struct RecompPrototypeTouchControls: View {
         .opacity(resolved.resolvedOpacity)
         .position(x: canvas.width * resolved.x, y: canvas.height * resolved.y)
         .accessibilityLabel(placement.id.accessibilityLabel)
+    }
+}
+
+/// Mirrors GoldenEye's Rumble Pak motor on the connected controller's haptics.
+/// The game pulses its motor on and off to vary strength, so the per-tick
+/// samples are smoothed into the intensity of one long-running haptic player.
+@MainActor
+final class RecompControllerRumble {
+    private var engine: CHHapticEngine?
+    private var player: CHHapticAdvancedPatternPlayer?
+    private var playerPaused = false
+    private var level: Float = 0
+    private var sentIntensity: Float = 0
+
+    func attach(_ controller: GCController?) {
+        stop()
+        guard let engine = controller?.haptics?.createEngine(withLocality: .default) else { return }
+        engine.stoppedHandler = { [weak self] _ in
+            Task { @MainActor in self?.discardPlayer() }
+        }
+        engine.resetHandler = { [weak self] in
+            Task { @MainActor in self?.discardPlayer() }
+        }
+        self.engine = engine
+    }
+
+    func update(active: Bool) {
+        level += ((active ? 1 : 0) - level) * 0.3
+        if !active && level < 0.03 { level = 0 }
+        let intensity: Float = level == 0 ? 0 : 0.35 + 0.65 * level
+        guard abs(intensity - sentIntensity) >= 0.05 || (intensity == 0) != (sentIntensity == 0) else {
+            return
+        }
+        sentIntensity = intensity
+        if intensity == 0 {
+            if let player, !playerPaused {
+                try? player.pause(atTime: CHHapticTimeImmediate)
+                playerPaused = true
+            }
+            return
+        }
+        guard let player = preparedPlayer() else { return }
+        try? player.sendParameters(
+            [CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: intensity, relativeTime: 0)],
+            atTime: CHHapticTimeImmediate
+        )
+        if playerPaused {
+            try? player.resume(atTime: CHHapticTimeImmediate)
+            playerPaused = false
+        }
+    }
+
+    private func preparedPlayer() -> CHHapticAdvancedPatternPlayer? {
+        if let player { return player }
+        guard let engine else { return nil }
+        do {
+            try engine.start()
+            let rumble = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.3),
+                ],
+                relativeTime: 0,
+                duration: 30
+            )
+            let player = try engine.makeAdvancedPlayer(with: CHHapticPattern(events: [rumble], parameters: []))
+            player.loopEnabled = true
+            try player.start(atTime: CHHapticTimeImmediate)
+            self.player = player
+            playerPaused = false
+            return player
+        } catch {
+            return nil
+        }
+    }
+
+    private func discardPlayer() {
+        player = nil
+        playerPaused = false
+        sentIntensity = 0
+    }
+
+    private func stop() {
+        try? player?.stop(atTime: CHHapticTimeImmediate)
+        engine?.stop()
+        player = nil
+        engine = nil
+        playerPaused = false
+        level = 0
+        sentIntensity = 0
     }
 }
 

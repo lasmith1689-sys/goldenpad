@@ -77,6 +77,7 @@ std::atomic<int32_t> prototypeResolutionMode = 2;
 std::atomic<bool> prototypeThreePointFiltering = true;
 std::atomic<bool> invertAimY = false;
 std::atomic<bool> unlockAllMissions = false;
+std::atomic<bool> texturedSky = true;
 std::atomic<bool> returnToTitleRequested = false;
 std::atomic<bool> appActive = true;
 std::atomic<bool> controllerConnected = false;
@@ -2575,6 +2576,19 @@ extern "C" void goldenpad_recomp_consume_reload(uint8_t *rdram, recomp_context *
 
 extern "C" void goldenpad_recomp_unlock_all_missions_enabled(uint8_t *, recomp_context *ctx) {
     ctx->r2 = unlockAllMissions.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+// Read by the personal skybox patch each sky draw: textured clouds, or the
+// previous flat fog-colour fill when the setting is off.
+extern "C" void goldenpad_recomp_textured_sky_enabled(uint8_t *, recomp_context *ctx) {
+    ctx->r2 = texturedSky.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+extern "C" void goldenpad_recomp_set_textured_sky(int32_t enabled) {
+    const bool next = enabled != 0;
+    if (texturedSky.exchange(next, std::memory_order_relaxed) != next) {
+        logEvent("graphics", "textured sky %s", next ? "enabled" : "disabled");
+    }
 }
 
 extern "C" void goldenpad_recomp_consume_return_to_title(uint8_t *, recomp_context *ctx) {

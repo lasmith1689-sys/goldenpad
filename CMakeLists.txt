@@ -413,6 +413,7 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
         foreach(required_bridge IN ITEMS
                 "recomp_get_camera_inputs"
                 "goldenpad_recomp_mouse_camera_aim_active"
+                "goldenpad_recomp_textured_sky_enabled"
                 "goldenpad_recomp_consume_crouch_toggle"
                 "goldenpad_recomp_consume_inventory_slot"
                 "goldenpad_recomp_consume_reload"

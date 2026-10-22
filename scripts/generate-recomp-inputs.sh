@@ -35,6 +35,13 @@ for name in json.loads((root/'source-manifest.json').read_text())['files']:
   shutil.copy2(root/name,dest,follow_symlinks=False)
 PYCOPY
 fi
+# Personal-build game-patch changes (textured sky, Rumble Pak motor init) on
+# top of the pinned GoldenEye64Recomp export; the vendored source stays pinned.
+for personal_patch in "$repo_root"/patches/personal/*.patch; do
+  [ -e "$personal_patch" ] || continue
+  echo "Applying $(basename "$personal_patch")"
+  patch -d "$output" -p1 --forward --batch < "$personal_patch"
+done
 cp "$rom" "$output/ge007.tlbfree.z64"
 "$tools/N64Recomp" "$output/us.toml"
 python3 "$output/tools_weaken_patched.py"

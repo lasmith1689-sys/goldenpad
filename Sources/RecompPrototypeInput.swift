@@ -40,6 +40,9 @@ private func goldenPadRecompRequestReload(_ controller: Int32)
 @_silgen_name("goldenpad_recomp_get_rumble")
 private func goldenPadRecompGetRumble(_ controller: Int32) -> Int32
 
+@_silgen_name("goldenpad_recomp_set_textured_sky")
+private func goldenPadRecompSetTexturedSky(_ enabled: Int32)
+
 @_silgen_name("goldenpad_recomp_set_invert_aim_y")
 private func goldenPadRecompSetInvertAimY(_ enabled: Int32)
 
@@ -410,6 +413,10 @@ final class RecompPrototypeInput: ObservableObject {
     func configureControllerTurnBoost(_ enabled: Bool) {
         controllerTurnBoostEnabled = enabled
         fullTiltStartedAt = nil
+    }
+
+    func configureTexturedSky(_ enabled: Bool) {
+        goldenPadRecompSetTexturedSky(enabled ? 1 : 0)
     }
 
     func configureControllerRumble(_ enabled: Bool) {

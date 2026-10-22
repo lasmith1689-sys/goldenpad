@@ -56,6 +56,7 @@ struct GoldenPadApp: App {
     @AppStorage("recomp.msaaEnabled") private var msaaEnabled = true
     @AppStorage("recomp.resolutionMode") private var resolutionMode = RecompPrototypeResolutionMode.automatic.rawValue
     @AppStorage("recomp.threePointFiltering") private var threePointFiltering = true
+    @AppStorage("recomp.texturedSky") private var texturedSky = true
     @AppStorage("recomp.unlockAllMissions") private var unlockAllMissions = false
     @AppStorage("recomp.twoPlayerTestMode") private var twoPlayerTestMode = false
     @AppStorage("recomp.fourPlayerTestMode") private var fourPlayerTestMode = false
@@ -193,6 +194,7 @@ struct GoldenPadApp: App {
                 input.configureControllerLookSpeed(controllerLookSpeed)
                 input.configureControllerTurnBoost(controllerTurnBoost)
                 input.configureControllerRumble(controllerRumble)
+                input.configureTexturedSky(texturedSky)
                 input.configureControllerMapping(controllerMapping)
                 input.configureInvertAimY(invertAimY)
                 input.configureUnlockAllMissions(unlockAllMissions)
@@ -216,6 +218,7 @@ struct GoldenPadApp: App {
                 input.configureControllerLookSpeed(controllerLookSpeed)
                 input.configureControllerTurnBoost(controllerTurnBoost)
                 input.configureControllerRumble(controllerRumble)
+                input.configureTexturedSky(texturedSky)
                 input.configureControllerMapping(controllerMapping)
             }
             .onChange(of: invertAimY) { _, value in
@@ -303,6 +306,7 @@ struct GoldenPadApp: App {
                         msaaEnabled: $msaaEnabled,
                         resolutionMode: $resolutionMode,
                         threePointFiltering: $threePointFiltering,
+                        texturedSky: $texturedSky,
                         unlockAllMissions: $unlockAllMissions,
                         twoPlayerTestMode: $twoPlayerTestMode,
                         fourPlayerTestMode: $fourPlayerTestMode,
@@ -506,6 +510,7 @@ struct GoldenPadApp: App {
             String(controllerLookSpeed),
             String(controllerTurnBoost),
             String(controllerRumble),
+            String(texturedSky),
         ]
     }
 }
@@ -670,6 +675,7 @@ private struct RecompPrototypeSettingsView: View {
     @Binding var msaaEnabled: Bool
     @Binding var resolutionMode: String
     @Binding var threePointFiltering: Bool
+    @Binding var texturedSky: Bool
     @Binding var unlockAllMissions: Bool
     @Binding var twoPlayerTestMode: Bool
     @Binding var fourPlayerTestMode: Bool
@@ -693,6 +699,10 @@ private struct RecompPrototypeSettingsView: View {
                     }
                     Toggle("2× anti-aliasing", isOn: $msaaEnabled)
                     Toggle("N64 three-point texture filtering", isOn: $threePointFiltering)
+                    Toggle("Textured sky", isOn: $texturedSky)
+                    Text("Draws GoldenEye's cloud sky. Turn off to go back to the flat fog-colour sky. Applies immediately.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Text("These settings are saved immediately, but they change the renderer only after fully quitting and reopening GoldenPad. To restore the original look, select Native N64 and turn off both enhancements before restarting the app.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

@@ -1,0 +1,280 @@
+diff -ru a/patches/patches.h b/patches/patches.h
+--- a/patches/patches.h	2026-10-22 17:41:52.240322600 -0400
++++ b/patches/patches.h	2026-10-22 17:42:10.339193200 -0400
+@@ -119,6 +119,7 @@
+ float recomp_get_aspect_ratio(float);
+ void recomp_get_camera_inputs(s32 controllernum, float* x, float* y);
+ s32 goldenpad_recomp_mouse_camera_aim_active(s32 controllernum);
++s32 goldenpad_recomp_textured_sky_enabled(void);
+ s32 goldenpad_recomp_consume_crouch_toggle(s32 controllernum);
+ s32 goldenpad_recomp_unlock_all_missions_enabled(void);
+ s32 goldenpad_recomp_consume_return_to_title(void);
+diff -ru a/patches/skybox.c b/patches/skybox.c
+--- a/patches/skybox.c	2026-10-22 17:41:51.793333800 -0400
++++ b/patches/skybox.c	2026-10-22 17:45:54.245908900 -0400
+@@ -2,25 +2,28 @@
+ #include "gbi_extension.h"
+ 
+ #if 1
+-RECOMP_PATCH Gfx* skyRenderTri(Gfx* gdl, SkyRelated38* v1, SkyRelated38* v2, SkyRelated38* v3, f32 scale,
+-                                    bool textured) {
++/* GoldenPad: the original skyRenderTri/skyRenderFull emit raw RDP edge-walked
++ * triangles, which RT64 does not rasterize, so this port used to draw a flat
++ * fog-colour rectangle instead. When the host's "Textured sky" setting is on,
++ * the same screen-space vertices are re-emitted as ordinary RSP geometry:
++ * clip = (ndcX*w, ndcY*w, 0, w) under a pass-through projection, so the
++ * renderer does the perspective-correct texture divide the RDP would have.
++ * Approach and units follow the MIT-licensed jkdansereau/goldeneye-pc-port
++ * (skyPortRenderPoly): unk28/unk2c are screen X/Y * 4, unk0c is w, and
++ * unk20/unk24 are S/T already in S10.5 (1/32 texel) units. */
++
++/* One 64-texel cloud tile in S10.5 units; folding S/T by whole tiles keeps
++ * them in s16 range without moving the texture. */
++#define GOLDENPAD_SKY_TC_WRAP 2048.0f
++
++static Gfx* goldenpadSkyFill(Gfx* gdl) {
+     u32 left = viGetViewLeft();
+     u32 top = viGetViewTop();
+     u32 right = left + viGetViewWidth();
+     u32 bottom = top + viGetViewHeight();
+-
+-    // Fetch the current environment (this is where fog and sky color are stored)
+     struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
++    u32 fill_color = GPACK_RGBA5551(env->Red, env->Green, env->Blue, 1);
+ 
+-    // Get the fog color components (assumes fog color is stored in RGBA format)
+-    u8 red = env->Red;
+-    u8 green = env->Green;
+-    u8 blue = env->Blue;
+-
+-    // Set the fog color as the fill color for the skybox
+-    u32 fill_color = GPACK_RGBA5551(red, green, blue, 1); // Fog color instead of hardcoded light blue
+-
+-    // Fill the skybox with the fog color
+     gDPPipeSync(gdl++);
+     gDPSetCycleType(gdl++, G_CYC_FILL);
+     gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
+@@ -37,41 +40,176 @@
+     return gdl;
+ }
+ 
+-RECOMP_PATCH Gfx* skyRenderFull(Gfx* gdl, SkyRelated38* arg1, SkyRelated38* arg2, SkyRelated38* arg3,
+-                                    SkyRelated38* arg4, f32 arg5) {
+-    u32 left = viGetViewLeft();
+-    u32 top = viGetViewTop();
+-    u32 right = left + viGetViewWidth();
+-    u32 bottom = top + viGetViewHeight();
++/* RT64 matrix group with an explicit aspect mode. The game's copy of
++ * rt64_extended_gbi.h predates the aspect field; this encodes the runtime's
++ * current G_EX_MATRIXGROUP_V1 layout so the sky's projection is stretched to
++ * the full widescreen width instead of being narrowed to the middle 4:3. */
++#define GOLDENPAD_EX_ASPECT_STRETCH 0x1
++#define goldenpadSkyMatrixGroup(cmd, proj)                                              \
++    G_EX_COMMAND2(cmd,                                                                  \
++        PARAM(RT64_EXTENDED_OPCODE, 8, 24) | PARAM(G_EX_MATRIXGROUP_V1, 24, 0),        \
++        G_EX_ID_IGNORE,                                                                  \
++        PARAM(G_EX_PUSH, 1, 0) | PARAM((proj) != 0, 1, 1) | PARAM(G_EX_INTERPOLATE_SIMPLE, 1, 2) | \
++        PARAM(G_EX_COMPONENT_SKIP, 2, 3) | PARAM(G_EX_COMPONENT_SKIP, 2, 5) |          \
++        PARAM(G_EX_COMPONENT_SKIP, 2, 7) | PARAM(G_EX_COMPONENT_SKIP, 2, 9) |          \
++        PARAM(G_EX_COMPONENT_SKIP, 2, 11) | PARAM(G_EX_COMPONENT_SKIP, 2, 13) |        \
++        PARAM(G_EX_COMPONENT_SKIP, 2, 15) | PARAM(G_EX_ORDER_LINEAR, 2, 17) |          \
++        PARAM(G_EX_EDIT_NONE, 1, 19) | PARAM(GOLDENPAD_EX_ASPECT_STRETCH, 2, 20) |     \
++        PARAM(G_EX_COMPONENT_SKIP, 2, 22) | PARAM(G_EX_COMPONENT_SKIP, 2, 24),         \
++        0)
++
++/* Largest whole number of tiles <= value (no libm in the patch build). */
++static f32 goldenpadSkyFloorTiles(f32 value) {
++    f32 q = value / GOLDENPAD_SKY_TC_WRAP;
++    s32 n = (s32) q;
++    if ((f32) n > q) {
++        n--;
++    }
++    return (f32) n * GOLDENPAD_SKY_TC_WRAP;
++}
+ 
+-    // Fetch the current environment to get fog color
+-    struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
++static void goldenpadSkyIdentity(Mtxf* m) {
++    s32 i, j;
++    for (i = 0; i < 4; i++) {
++        for (j = 0; j < 4; j++) {
++            m->m[i][j] = (i == j) ? 1.0f : 0.0f;
++        }
++    }
++}
+ 
+-    // Get the fog color components
+-    u8 red = env->Red;
+-    u8 green = env->Green;
+-    u8 blue = env->Blue;
++static Gfx* goldenpadSkyPoly(Gfx* gdl, SkyRelated38** v, s32 n, bool textured) {
++    f32 l = getPlayer_c_screenleft();
++    f32 t = getPlayer_c_screentop();
++    f32 r = l + getPlayer_c_screenwidth();
++    f32 b = t + getPlayer_c_screenheight();
++    f32 maxW = 0.0f;
++    f32 wScale = 1.0f;
++    f32 foldS, foldT, area;
++    Mtxf projf, identf;
++    Mtx* proj;
++    Mtx* ident;
++    Vtx* verts;
++    s32 i;
+ 
+-    // Set the fog color as the fill color for the skybox
+-    u32 fill_color = GPACK_RGBA5551(red, green, blue, 1); // Use fog color for the background
++    if (r <= l || b <= t) {
++        return gdl;
++    }
++    /* Same degenerate-triangle early-out as the original rasterizer setup. */
++    area = (v[1]->unk28 - v[0]->unk28) * (v[2]->unk2c - v[0]->unk2c) -
++           (v[2]->unk28 - v[0]->unk28) * (v[1]->unk2c - v[0]->unk2c);
++    if (area == 0.0f && n == 3) {
++        return gdl;
++    }
+ 
+-    // Fill the skybox with the fog color
+-    gDPPipeSync(gdl++);
+-    gDPSetCycleType(gdl++, G_CYC_FILL);
+-    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
+-    if (left == 0 && right == viGetX()) {
+-        gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+-            0, top, 0, bottom);
++    for (i = 0; i < n; i++) {
++        f32 w = v[i]->unk0c;
++        if (w <= 0.0f) {
++            return gdl; /* behind the eye: the RDP path never draws these */
++        }
++        if (w > maxW) {
++            maxW = w;
++        }
++    }
++    /* Vtx positions are s16. Scale every vertex of the primitive by the same
++     * power of two (perspective ratios are unchanged) so the largest w lands
++     * between 16000 and 32000; neighbouring primitives usually pick the same
++     * scale, so shared edges quantize identically. */
++    while (maxW * wScale > 32000.0f) {
++        wScale *= 0.5f;
++    }
++    while (maxW * wScale * 2.0f <= 32000.0f && wScale < 65536.0f) {
++        wScale *= 2.0f;
++    }
++
++    foldS = v[0]->unk20;
++    foldT = v[0]->unk24;
++    for (i = 1; i < n; i++) {
++        if (v[i]->unk20 < foldS) foldS = v[i]->unk20;
++        if (v[i]->unk24 < foldT) foldT = v[i]->unk24;
++    }
++    foldS = goldenpadSkyFloorTiles(foldS);
++    foldT = goldenpadSkyFloorTiles(foldT);
++
++    verts = (Vtx*) dynAllocate7F0BD6C4(n);
++    proj = dynAllocateMatrix();
++    ident = dynAllocateMatrix();
++
++    for (i = 0; i < n; i++) {
++        f32 ndcX = 2.0f * (((v[i]->unk28 * 0.25f) - l) / (r - l)) - 1.0f;
++        f32 ndcY = 1.0f - 2.0f * (((v[i]->unk2c * 0.25f) - t) / (b - t));
++        f32 w = v[i]->unk0c * wScale;
++
++        verts[i].v.ob[0] = (s16) skyClamp(ndcX * w, -32767.0f, 32767.0f);
++        verts[i].v.ob[1] = (s16) skyClamp(ndcY * w, -32767.0f, 32767.0f);
++        verts[i].v.ob[2] = (s16) skyClamp(w, 1.0f, 32767.0f);
++        verts[i].v.flag = 0;
++        verts[i].v.tc[0] = (s16) skyClamp(v[i]->unk20 - foldS, -32768.0f, 32767.0f);
++        verts[i].v.tc[1] = (s16) skyClamp(v[i]->unk24 - foldT, -32768.0f, 32767.0f);
++        verts[i].v.cn[0] = (u8) skyClamp(v[i]->r, 0.0f, 255.0f);
++        verts[i].v.cn[1] = (u8) skyClamp(v[i]->g, 0.0f, 255.0f);
++        verts[i].v.cn[2] = (u8) skyClamp(v[i]->b, 0.0f, 255.0f);
++        verts[i].v.cn[3] = (u8) skyClamp(v[i]->a, 0.0f, 255.0f);
++    }
++
++    /* Row-vector N64 convention: object (x, y, z, 1) -> clip (x, y, 0, z). */
++    goldenpadSkyIdentity(&projf);
++    projf.m[2][2] = 0.0f;
++    projf.m[2][3] = 1.0f;
++    projf.m[3][3] = 0.0f;
++    goldenpadSkyIdentity(&identf);
++    matrix_4x4_f32_to_s32(&projf, (Mtxf*) proj);
++    matrix_4x4_f32_to_s32(&identf, (Mtxf*) ident);
++
++    gEXPushProjectionMatrix(gdl++);
++    gEXPushGeometryMode(gdl++);
++    goldenpadSkyMatrixGroup(gdl++, G_MTX_PROJECTION);
++    gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(proj), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
++    gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(ident), G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_PUSH);
++    gSPClearGeometryMode(gdl++, G_LIGHTING | G_CULL_BOTH | G_FOG | G_ZBUFFER | G_TEXTURE_GEN);
++    gSPSetGeometryMode(gdl++, G_SHADE | G_SHADING_SMOOTH);
++    gSPTexture(gdl++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, textured ? G_ON : G_OFF);
++    gSPVertex(gdl++, OS_K0_TO_PHYSICAL(verts), n, 0);
++    if (n >= 4) {
++        /* TL, TR, BL, BR */
++        gSP2Triangles(gdl++, 0, 1, 3, 0, 0, 3, 2, 0);
+     } else {
+-        gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, right, bottom);
++        gSP2Triangles(gdl++, 0, 1, 2, 0, 0, 1, 2, 0);
+     }
+-    gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
+-    gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
+-    gDPPipeSync(gdl++);
++    gSPPopMatrix(gdl++, G_MTX_MODELVIEW);
++    gEXPopMatrixGroup(gdl++, G_MTX_PROJECTION);
++    gEXPopGeometryMode(gdl++);
++    gEXPopProjectionMatrix(gdl++);
+ 
+     return gdl;
+ }
+ 
++RECOMP_PATCH Gfx* skyRenderTri(Gfx* gdl, SkyRelated38* v1, SkyRelated38* v2, SkyRelated38* v3, f32 scale,
++                                    bool textured) {
++    SkyRelated38* v[3];
++
++    if (!goldenpad_recomp_textured_sky_enabled()) {
++        return goldenpadSkyFill(gdl);
++    }
++    v[0] = v1;
++    v[1] = v2;
++    v[2] = v3;
++    return goldenpadSkyPoly(gdl, v, 3, textured);
++}
++
++RECOMP_PATCH Gfx* skyRenderFull(Gfx* gdl, SkyRelated38* arg1, SkyRelated38* arg2, SkyRelated38* arg3,
++                                    SkyRelated38* arg4, f32 arg5) {
++    SkyRelated38* v[4];
++
++    if (!goldenpad_recomp_textured_sky_enabled()) {
++        return goldenpadSkyFill(gdl);
++    }
++    v[0] = arg1;
++    v[1] = arg2;
++    v[2] = arg3;
++    v[3] = arg4;
++    return goldenpadSkyPoly(gdl, v, 4, TRUE);
++}
++
+ #endif
+ 
+ #define PORTSKY 1
+diff -ru a/patches/syms.ld b/patches/syms.ld
+--- a/patches/syms.ld	2026-10-22 17:41:52.637935200 -0400
++++ b/patches/syms.ld	2026-10-22 17:42:10.314152500 -0400
+@@ -85,3 +85,4 @@
+ goldenpad_recomp_consume_reload = 0x8F000128;
+ goldenpad_recomp_consume_inventory_slot = 0x8F00012C;
+ goldenpad_recomp_mouse_camera_aim_active = 0x8F000130;
++goldenpad_recomp_textured_sky_enabled = 0x8F000134;
+diff -ru a/patches/widescreen.c b/patches/widescreen.c
+--- a/patches/widescreen.c	2026-10-22 17:41:51.798153100 -0400
++++ b/patches/widescreen.c	2026-10-22 17:42:18.969927200 -0400
+@@ -530,5 +530,10 @@
+ 
+     // @recomp: force rumble pak plugged in.
+     g_ContRumblePakInitState[index] = 1;
++    // GoldenPad: also initialize the motor so osMotorStart/Stop reach the
++    // host's set_rumble callback (the runtime ignores an uninitialized pak).
++    // The host reports a Rumble Pak on port 1 only; other ports fail here
++    // harmlessly and stay silent.
++    osMotorInit_recomp(&g_ContInputMessageQueue, &g_ContPfs[index], index);
+ }
+ #endif

@@ -75,7 +75,9 @@ final class RecompPrototypeAudio: ObservableObject {
     func activate() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.ambient, mode: .default)
+            // .playback, not .ambient: the ring/silent switch muted all game
+            // audio. Mixing keeps other apps' music playing if the user wants.
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
             try startEngine()
             goldenPadRecompNoteAudioHostRates(

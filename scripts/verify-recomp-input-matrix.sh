@@ -150,8 +150,17 @@ fi
 echo "PASS: Preview 4 external-controller look rate is 1.872 degrees per frame"
 
 python3 "$repo_root/scripts/check-sources.py" --component goldeneye
+# The maintained source is the pinned export plus patches/personal/*.patch,
+# exactly as generate-recomp-inputs.sh builds it.
+maintained_root="$test_root/maintained-goldeneye"
+mkdir -p "$maintained_root/patches"
+cp "$repo_root/vendor/goldeneye/patches/"* "$maintained_root/patches/"
+for personal_patch in "$repo_root"/patches/personal/*.patch; do
+  [ -e "$personal_patch" ] || continue
+  patch -d "$maintained_root" -p1 --forward --batch --silent < "$personal_patch"
+done
 for source_path in patches/externs.h patches/patches.h patches/syms.ld patches/workbench_theboy.c; do
-  if ! cmp "$repo_root/vendor/goldeneye/$source_path" "$reference_root/$source_path"; then
+  if ! cmp "$maintained_root/$source_path" "$reference_root/$source_path"; then
     echo "FAIL: generated input source differs from maintained source: $source_path" >&2
     exit 1
   fi

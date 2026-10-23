@@ -11,7 +11,7 @@ diff -ru a/patches/patches.h b/patches/patches.h
  s32 goldenpad_recomp_consume_return_to_title(void);
 diff -ru a/patches/skybox.c b/patches/skybox.c
 --- a/patches/skybox.c	2026-10-22 17:41:51.793333800 -0400
-+++ b/patches/skybox.c	2026-10-23 12:30:10.323471200 -0400
++++ b/patches/skybox.c	2026-10-23 13:21:09.872855300 -0400
 @@ -2,69 +2,57 @@
  #include "gbi_extension.h"
  
@@ -111,7 +111,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
      gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
      gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
      gDPPipeSync(gdl++);
-@@ -72,6 +60,192 @@
+@@ -72,6 +60,210 @@
      return gdl;
  }
  
@@ -165,6 +165,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    Mtxf projf, identf;
 +    Mtx* proj;
 +    Mtx* ident;
++    Vp* vp;
 +    Vtx* verts;
 +    s32 i;
 +
@@ -222,6 +223,20 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    verts = dynAllocateVertices(n);
 +    proj = dynAllocateMatrix();
 +    ident = dynAllocateMatrix();
++    /* A Vp is 16 bytes and needs 8-byte alignment; a per-frame matrix slot
++     * (64 bytes, aligned) is a safe home for it. */
++    vp = (Vp*) dynAllocateMatrix();
++    /* The ndc above is relative to this player's view, so the viewport must be
++     * exactly that view. The viewport left over from earlier draws in the frame
++     * is not: it squeezed the sky into a small box or put it off screen. */
++    vp->vp.vscale[0] = (s16) ((r - l) * 2.0f);
++    vp->vp.vscale[1] = (s16) ((b - t) * 2.0f);
++    vp->vp.vscale[2] = G_MAXZ / 2;
++    vp->vp.vscale[3] = 0;
++    vp->vp.vtrans[0] = (s16) ((l + r) * 2.0f);
++    vp->vp.vtrans[1] = (s16) ((t + b) * 2.0f);
++    vp->vp.vtrans[2] = G_MAXZ / 2;
++    vp->vp.vtrans[3] = 0;
 +
 +    for (i = 0; i < n; i++) {
 +        f32 ndcX = 2.0f * (((v[i]->unk28 * 0.25f) - l) / (r - l)) - 1.0f;
@@ -252,7 +267,9 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    gDPPipeSync(gdl++);
 +    gdl = goldenpadSkyScissor(gdl);
 +    gEXPushProjectionMatrix(gdl++);
++    gEXPushViewport(gdl++);
 +    gEXPushGeometryMode(gdl++);
++    gSPViewport(gdl++, OS_K0_TO_PHYSICAL(vp));
 +    goldenpadSkyMatrixGroup(gdl++, G_MTX_PROJECTION);
 +    gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(proj), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
 +    gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(ident), G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_PUSH);
@@ -269,6 +286,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    gSPPopMatrix(gdl++, G_MTX_MODELVIEW);
 +    gEXPopMatrixGroup(gdl++, G_MTX_PROJECTION);
 +    gEXPopGeometryMode(gdl++);
++    gEXPopViewport(gdl++);
 +    gEXPopProjectionMatrix(gdl++);
 +
 +    return gdl;

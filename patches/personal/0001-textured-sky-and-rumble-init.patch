@@ -11,8 +11,8 @@ diff -ru a/patches/patches.h b/patches/patches.h
  s32 goldenpad_recomp_consume_return_to_title(void);
 diff -ru a/patches/skybox.c b/patches/skybox.c
 --- a/patches/skybox.c	2026-10-22 17:41:51.793333800 -0400
-+++ b/patches/skybox.c	2026-10-23 07:34:26.423818800 -0400
-@@ -2,69 +2,54 @@
++++ b/patches/skybox.c	2026-10-23 12:30:10.323471200 -0400
+@@ -2,69 +2,57 @@
  #include "gbi_extension.h"
  
  #if 1
@@ -31,6 +31,9 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +/* One 64-texel cloud tile in S10.5 units; folding S/T by whole tiles keeps
 + * them in s16 range without moving the texture. */
 +#define GOLDENPAD_SKY_TC_WRAP 2048.0f
++/* Largest far/near w ratio kept: the near corners then keep w >= 500 of
++ * the 32000 s16 budget, i.e. sub-pixel position precision. */
++#define GOLDENPAD_SKY_W_RATIO 64.0f
 +
 +Vtx* dynAllocateVertices(s32 count);
 +
@@ -108,7 +111,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
      gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
      gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
      gDPPipeSync(gdl++);
-@@ -72,6 +57,178 @@
+@@ -72,6 +60,192 @@
      return gdl;
  }
  
@@ -155,6 +158,8 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    f32 r = l + getPlayer_c_screenwidth();
 +    f32 b = t + getPlayer_c_screenheight();
 +    f32 maxW = 0.0f;
++    f32 minW = 0.0f;
++    f32 wCap;
 +    f32 wScale = 1.0f;
 +    f32 foldS, foldT, area;
 +    Mtxf projf, identf;
@@ -181,6 +186,18 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +        if (w > maxW) {
 +            maxW = w;
 +        }
++        if (minW == 0.0f || w < minW) {
++            minW = w;
++        }
++    }
++    /* Horizon vertices sit almost at infinity (w can be 10^4+ times the near
++     * corners'). Scaling those into s16 would round the near vertices' ndc*w
++     * to nothing and collapse the upper sky, so cap the far w at
++     * GOLDENPAD_SKY_W_RATIO x the nearest. Screen positions stay exact (x/w is
++     * unchanged); only texture perspective right at the horizon flattens. */
++    wCap = minW * GOLDENPAD_SKY_W_RATIO;
++    if (maxW > wCap) {
++        maxW = wCap;
 +    }
 +    /* Vtx positions are s16. Scale every vertex of the primitive by the same
 +     * power of two (perspective ratios are unchanged) so the largest w lands
@@ -209,7 +226,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    for (i = 0; i < n; i++) {
 +        f32 ndcX = 2.0f * (((v[i]->unk28 * 0.25f) - l) / (r - l)) - 1.0f;
 +        f32 ndcY = 1.0f - 2.0f * (((v[i]->unk2c * 0.25f) - t) / (b - t));
-+        f32 w = v[i]->unk0c * wScale;
++        f32 w = (v[i]->unk0c > wCap ? wCap : v[i]->unk0c) * wScale;
 +
 +        verts[i].v.ob[0] = (s16) skyClamp(ndcX * w, -32767.0f, 32767.0f);
 +        verts[i].v.ob[1] = (s16) skyClamp(ndcY * w, -32767.0f, 32767.0f);

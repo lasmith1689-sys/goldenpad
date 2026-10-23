@@ -11,7 +11,7 @@ diff -ru a/patches/patches.h b/patches/patches.h
  s32 goldenpad_recomp_consume_return_to_title(void);
 diff -ru a/patches/skybox.c b/patches/skybox.c
 --- a/patches/skybox.c	2026-10-22 17:41:51.793333800 -0400
-+++ b/patches/skybox.c	2026-10-23 13:21:09.872855300 -0400
++++ b/patches/skybox.c	2026-10-23 15:13:18.661885000 -0400
 @@ -2,69 +2,57 @@
  #include "gbi_extension.h"
  
@@ -111,7 +111,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
      gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
      gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
      gDPPipeSync(gdl++);
-@@ -72,6 +60,210 @@
+@@ -72,6 +60,228 @@
      return gdl;
  }
  
@@ -141,6 +141,24 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +        n--;
 +    }
 +    return (f32) n * GOLDENPAD_SKY_TC_WRAP;
++}
++
++/* Float -> N64 fixed-point Mtx with a plain 1.0 scale. The game's
++ * matrix_4x4_f32_to_s32 multiplies the x/y/z columns by a global world scale
++ * (D_80032310[0]) that the room renderer changes mid-frame, which shrank the
++ * sky about the screen centre by that factor; this sky matrix must be exact.
++ * Same packing: integer halves in words 0-7, fractions in words 8-15. */
++static void goldenpadSkyMtxFromF(Mtxf* mf, Mtx* out) {
++    f32* src = (f32*) mf->m;
++    s32* dst = (s32*) out;
++    s32 i;
++
++    for (i = 0; i < 8; i++) {
++        s32 e1 = (s32) (src[i * 2 + 0] * 65536.0f);
++        s32 e2 = (s32) (src[i * 2 + 1] * 65536.0f);
++        dst[i] = (e1 & 0xffff0000) | (((u32) e2) >> 16);
++        dst[i + 8] = (e1 << 16) | (e2 & 0xffff);
++    }
 +}
 +
 +static void goldenpadSkyIdentity(Mtxf* m) {
@@ -261,8 +279,8 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    projf.m[2][3] = 1.0f;
 +    projf.m[3][3] = 0.0f;
 +    goldenpadSkyIdentity(&identf);
-+    matrix_4x4_f32_to_s32(&projf, (Mtxf*) proj);
-+    matrix_4x4_f32_to_s32(&identf, (Mtxf*) ident);
++    goldenpadSkyMtxFromF(&projf, proj);
++    goldenpadSkyMtxFromF(&identf, ident);
 +
 +    gDPPipeSync(gdl++);
 +    gdl = goldenpadSkyScissor(gdl);

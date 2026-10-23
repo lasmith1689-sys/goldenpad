@@ -75,6 +75,7 @@ std::array<std::atomic<bool>, kControllerPorts> reloadRequested{};
 std::atomic<bool> prototypeMsaaEnabled = true;
 std::atomic<int32_t> prototypeResolutionMode = 2;
 std::atomic<bool> prototypeThreePointFiltering = true;
+std::atomic<bool> prototypeWidescreen = true;
 std::atomic<bool> invertAimY = false;
 std::atomic<bool> unlockAllMissions = false;
 std::atomic<bool> texturedSky = true;
@@ -852,7 +853,11 @@ void configurePrototypeGraphics() {
     graphics.wm_option = ultramodern::renderer::WindowMode::Fullscreen;
     graphics.hr_option = ultramodern::renderer::HUDRatioMode::Clamp16x9;
     graphics.api_option = ultramodern::renderer::GraphicsApi::Metal;
-    graphics.ar_option = ultramodern::renderer::AspectRatio::Expand;
+    // Widescreen expands the 3D view to the display; off keeps the original
+    // 4:3 frame (pillarboxed), which also isolates widescreen-only artifacts.
+    graphics.ar_option = prototypeWidescreen.load(std::memory_order_relaxed)
+        ? ultramodern::renderer::AspectRatio::Expand
+        : ultramodern::renderer::AspectRatio::Original;
     const bool msaaEnabled = prototypeMsaaEnabled.load(std::memory_order_relaxed);
     graphics.msaa_option = msaaEnabled
         ? ultramodern::renderer::Antialiasing::MSAA2X
@@ -871,8 +876,9 @@ void configurePrototypeGraphics() {
         : graphics.res_option == ultramodern::renderer::Resolution::Original2x
             ? "2x resolution"
             : "automatic high resolution";
-    logEvent("graphics", "Metal %s, expanded aspect, %s, %s, original refresh",
+    logEvent("graphics", "Metal %s, %s aspect, %s, %s, original refresh",
         resolution,
+        prototypeWidescreen.load(std::memory_order_relaxed) ? "expanded" : "original 4:3",
         msaaEnabled ? "2x MSAA" : "MSAA off",
         prototypeThreePointFiltering.load(std::memory_order_relaxed)
             ? "three-point filtering" : "linear filtering");
@@ -1660,6 +1666,12 @@ extern "C" void goldenpad_recomp_set_resolution_mode(int32_t mode) {
 extern "C" void goldenpad_recomp_set_three_point_filtering(int32_t enabled) {
     if (!runtimeStarted.load(std::memory_order_relaxed)) {
         prototypeThreePointFiltering.store(enabled != 0, std::memory_order_relaxed);
+    }
+}
+
+extern "C" void goldenpad_recomp_set_widescreen(int32_t enabled) {
+    if (!runtimeStarted.load(std::memory_order_relaxed)) {
+        prototypeWidescreen.store(enabled != 0, std::memory_order_relaxed);
     }
 }
 

@@ -57,6 +57,7 @@ struct GoldenPadApp: App {
     @AppStorage("recomp.resolutionMode") private var resolutionMode = RecompPrototypeResolutionMode.automatic.rawValue
     @AppStorage("recomp.threePointFiltering") private var threePointFiltering = true
     @AppStorage("recomp.texturedSky") private var texturedSky = true
+    @AppStorage("recomp.widescreen") private var widescreen = true
     @AppStorage("recomp.unlockAllMissions") private var unlockAllMissions = false
     @AppStorage("recomp.twoPlayerTestMode") private var twoPlayerTestMode = false
     @AppStorage("recomp.fourPlayerTestMode") private var fourPlayerTestMode = false
@@ -307,6 +308,7 @@ struct GoldenPadApp: App {
                         resolutionMode: $resolutionMode,
                         threePointFiltering: $threePointFiltering,
                         texturedSky: $texturedSky,
+                        widescreen: $widescreen,
                         unlockAllMissions: $unlockAllMissions,
                         twoPlayerTestMode: $twoPlayerTestMode,
                         fourPlayerTestMode: $fourPlayerTestMode,
@@ -346,7 +348,8 @@ struct GoldenPadApp: App {
             surface: surface,
             msaaEnabled: msaaEnabled,
             resolutionMode: RecompPrototypeResolutionMode(rawValue: resolutionMode) ?? .automatic,
-            threePointFiltering: threePointFiltering)
+            threePointFiltering: threePointFiltering,
+            widescreen: widescreen)
         if lanNetplay.isPlaying {
             // The four-player composite is 4:3, and every quadrant is also
             // 4:3. Establish that source frame before scaling so iPhone does
@@ -676,6 +679,7 @@ private struct RecompPrototypeSettingsView: View {
     @Binding var resolutionMode: String
     @Binding var threePointFiltering: Bool
     @Binding var texturedSky: Bool
+    @Binding var widescreen: Bool
     @Binding var unlockAllMissions: Bool
     @Binding var twoPlayerTestMode: Bool
     @Binding var fourPlayerTestMode: Bool
@@ -699,6 +703,7 @@ private struct RecompPrototypeSettingsView: View {
                     }
                     Toggle("2× anti-aliasing", isOn: $msaaEnabled)
                     Toggle("N64 three-point texture filtering", isOn: $threePointFiltering)
+                    Toggle("Widescreen", isOn: $widescreen)
                     Toggle("Textured sky", isOn: $texturedSky)
                     Text("Draws GoldenEye's cloud sky. Turn off to go back to the flat fog-colour sky. Applies immediately.")
                         .font(.footnote)

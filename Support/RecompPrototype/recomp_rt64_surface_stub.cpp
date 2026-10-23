@@ -14,6 +14,7 @@ extern "C" void goldenpad_recomp_rt64_shutdown() {}
 extern "C" void goldenpad_recomp_set_msaa_enabled(int32_t) {}
 extern "C" void goldenpad_recomp_set_resolution_mode(int32_t) {}
 extern "C" void goldenpad_recomp_set_three_point_filtering(int32_t) {}
+extern "C" void goldenpad_recomp_set_widescreen(int32_t) {}
 extern "C" void goldenpad_recomp_set_controller_state(int32_t, uint32_t, int32_t, int32_t) {}
 extern "C" void goldenpad_recomp_set_right_analog(int32_t, int32_t, int32_t) {}
 extern "C" int32_t goldenpad_recomp_get_rumble(int32_t) { return 0; }

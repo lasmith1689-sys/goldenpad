@@ -11,8 +11,8 @@ diff -ru a/patches/patches.h b/patches/patches.h
  s32 goldenpad_recomp_consume_return_to_title(void);
 diff -ru a/patches/skybox.c b/patches/skybox.c
 --- a/patches/skybox.c	2026-10-22 17:41:51.793333800 -0400
-+++ b/patches/skybox.c	2026-10-22 17:57:44.422239500 -0400
-@@ -2,25 +2,30 @@
++++ b/patches/skybox.c	2026-10-23 07:34:26.423818800 -0400
+@@ -2,69 +2,54 @@
  #include "gbi_extension.h"
  
  #if 1
@@ -34,16 +34,20 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +
 +Vtx* dynAllocateVertices(s32 count);
 +
-+static Gfx* goldenpadSkyFill(Gfx* gdl) {
++/* The whole player view, widened to the full screen in widescreen. The sky is
++ * drawn before the rooms, and whatever scissor the previous draw left behind
++ * (often one portal's small rectangle) would otherwise clip it, leaving the
++ * rest of the sky as stale framebuffer smear. Left in place afterwards, as the
++ * accepted flat-fill sky always did. */
++static Gfx* goldenpadSkyScissor(Gfx* gdl) {
      u32 left = viGetViewLeft();
      u32 top = viGetViewTop();
      u32 right = left + viGetViewWidth();
      u32 bottom = top + viGetViewHeight();
--
--    // Fetch the current environment (this is where fog and sky color are stored)
-     struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
-+    u32 fill_color = GPACK_RGBA5551(env->Red, env->Green, env->Blue, 1);
  
+-    // Fetch the current environment (this is where fog and sky color are stored)
+-    struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
+-
 -    // Get the fog color components (assumes fog color is stored in RGBA format)
 -    u8 red = env->Red;
 -    u8 green = env->Green;
@@ -53,19 +57,61 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 -    u32 fill_color = GPACK_RGBA5551(red, green, blue, 1); // Fog color instead of hardcoded light blue
 -
 -    // Fill the skybox with the fog color
-     gDPPipeSync(gdl++);
-     gDPSetCycleType(gdl++, G_CYC_FILL);
-     gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
-@@ -37,41 +42,176 @@
+-    gDPPipeSync(gdl++);
+-    gDPSetCycleType(gdl++, G_CYC_FILL);
+-    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
+-    if (left == 0 && right == viGetX()) {
++    if (left == 0 && right == (u32) viGetX()) {
+         gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+             0, top, 0, bottom);
+     } else {
+         gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, right, bottom);
+     }
+-    gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
+-    gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
+-    gDPPipeSync(gdl++);
+-
      return gdl;
  }
  
 -RECOMP_PATCH Gfx* skyRenderFull(Gfx* gdl, SkyRelated38* arg1, SkyRelated38* arg2, SkyRelated38* arg3,
 -                                    SkyRelated38* arg4, f32 arg5) {
--    u32 left = viGetViewLeft();
--    u32 top = viGetViewTop();
--    u32 right = left + viGetViewWidth();
--    u32 bottom = top + viGetViewHeight();
++static Gfx* goldenpadSkyFill(Gfx* gdl) {
+     u32 left = viGetViewLeft();
+     u32 top = viGetViewTop();
+     u32 right = left + viGetViewWidth();
+     u32 bottom = top + viGetViewHeight();
+-
+-    // Fetch the current environment to get fog color
+     struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
++    u32 fill_color = GPACK_RGBA5551(env->Red, env->Green, env->Blue, 1);
+ 
+-    // Get the fog color components
+-    u8 red = env->Red;
+-    u8 green = env->Green;
+-    u8 blue = env->Blue;
+-
+-    // Set the fog color as the fill color for the skybox
+-    u32 fill_color = GPACK_RGBA5551(red, green, blue, 1); // Use fog color for the background
+-
+-    // Fill the skybox with the fog color
+     gDPPipeSync(gdl++);
+     gDPSetCycleType(gdl++, G_CYC_FILL);
+     gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
+-    if (left == 0 && right == viGetX()) {
+-        gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
+-            0, top, 0, bottom);
+-    } else {
+-        gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, right, bottom);
+-    }
++    gdl = goldenpadSkyScissor(gdl);
+     gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
+     gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
+     gDPPipeSync(gdl++);
+@@ -72,6 +57,178 @@
+     return gdl;
+ }
+ 
 +/* RT64 matrix group with an explicit aspect mode. The game's copy of
 + * rt64_extended_gbi.h predates the aspect field; this encodes the runtime's
 + * current G_EX_MATRIXGROUP_V1 layout so the sky's projection is stretched to
@@ -93,9 +139,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    }
 +    return (f32) n * GOLDENPAD_SKY_TC_WRAP;
 +}
- 
--    // Fetch the current environment to get fog color
--    struct CurrentEnvironmentRecord* env = fogGetCurrentEnvironmentp();
++
 +static void goldenpadSkyIdentity(Mtxf* m) {
 +    s32 i, j;
 +    for (i = 0; i < 4; i++) {
@@ -104,11 +148,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +        }
 +    }
 +}
- 
--    // Get the fog color components
--    u8 red = env->Red;
--    u8 green = env->Green;
--    u8 blue = env->Blue;
++
 +static Gfx* goldenpadSkyPoly(Gfx* gdl, SkyRelated38** v, s32 n, bool textured) {
 +    f32 l = getPlayer_c_screenleft();
 +    f32 t = getPlayer_c_screentop();
@@ -122,9 +162,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    Mtx* ident;
 +    Vtx* verts;
 +    s32 i;
- 
--    // Set the fog color as the fill color for the skybox
--    u32 fill_color = GPACK_RGBA5551(red, green, blue, 1); // Use fog color for the background
++
 +    if (r <= l || b <= t) {
 +        return gdl;
 +    }
@@ -134,14 +172,7 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    if (area == 0.0f && n == 3) {
 +        return gdl;
 +    }
- 
--    // Fill the skybox with the fog color
--    gDPPipeSync(gdl++);
--    gDPSetCycleType(gdl++, G_CYC_FILL);
--    gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, viGetX(), osViGetCurrentFramebuffer());
--    if (left == 0 && right == viGetX()) {
--        gEXSetScissor(gdl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT,
--            0, top, 0, bottom);
++
 +    for (i = 0; i < n; i++) {
 +        f32 w = v[i]->unk0c;
 +        if (w <= 0.0f) {
@@ -201,6 +232,8 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    matrix_4x4_f32_to_s32(&projf, (Mtxf*) proj);
 +    matrix_4x4_f32_to_s32(&identf, (Mtxf*) ident);
 +
++    gDPPipeSync(gdl++);
++    gdl = goldenpadSkyScissor(gdl);
 +    gEXPushProjectionMatrix(gdl++);
 +    gEXPushGeometryMode(gdl++);
 +    goldenpadSkyMatrixGroup(gdl++, G_MTX_PROJECTION);
@@ -213,21 +246,17 @@ diff -ru a/patches/skybox.c b/patches/skybox.c
 +    if (n >= 4) {
 +        /* TL, TR, BL, BR */
 +        gSP2Triangles(gdl++, 0, 1, 3, 0, 0, 3, 2, 0);
-     } else {
--        gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, right, bottom);
++    } else {
 +        gSP2Triangles(gdl++, 0, 1, 2, 0, 0, 1, 2, 0);
-     }
--    gDPSetFillColor(gdl++, (fill_color << 16) | fill_color);
--    gDPFillRectangle(gdl++, left, top, right - 1, bottom - 1);
--    gDPPipeSync(gdl++);
++    }
 +    gSPPopMatrix(gdl++, G_MTX_MODELVIEW);
 +    gEXPopMatrixGroup(gdl++, G_MTX_PROJECTION);
 +    gEXPopGeometryMode(gdl++);
 +    gEXPopProjectionMatrix(gdl++);
- 
-     return gdl;
- }
- 
++
++    return gdl;
++}
++
 +RECOMP_PATCH Gfx* skyRenderTri(Gfx* gdl, SkyRelated38* v1, SkyRelated38* v2, SkyRelated38* v3, f32 scale,
 +                                    bool textured) {
 +    SkyRelated38* v[3];

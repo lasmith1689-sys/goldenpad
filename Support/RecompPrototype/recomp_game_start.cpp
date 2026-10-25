@@ -1670,9 +1670,20 @@ extern "C" void goldenpad_recomp_set_three_point_filtering(int32_t enabled) {
 }
 
 extern "C" void goldenpad_recomp_set_widescreen(int32_t enabled) {
-    if (!runtimeStarted.load(std::memory_order_relaxed)) {
-        prototypeWidescreen.store(enabled != 0, std::memory_order_relaxed);
+    const bool next = enabled != 0;
+    if (prototypeWidescreen.exchange(next, std::memory_order_relaxed) == next ||
+        !runtimeStarted.load(std::memory_order_relaxed)) {
+        return;
     }
+    // Aspect ratio is safe to change live (RT64Context::update_config only
+    // re-applies the user config; MSAA and resolution keep their launch values
+    // because only ar_option changes here), so the switch applies immediately.
+    ultramodern::renderer::GraphicsConfig graphics = ultramodern::renderer::get_graphics_config();
+    graphics.ar_option = next
+        ? ultramodern::renderer::AspectRatio::Expand
+        : ultramodern::renderer::AspectRatio::Original;
+    ultramodern::renderer::set_graphics_config(graphics);
+    logEvent("graphics", "aspect switched live to %s", next ? "expanded" : "original 4:3");
 }
 
 extern "C" int32_t goldenpad_recomp_three_point_filtering_enabled() {

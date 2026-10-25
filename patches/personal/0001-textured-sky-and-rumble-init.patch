@@ -351,8 +351,36 @@ diff -ru a/patches/syms.ld b/patches/syms.ld
 +goldenpad_recomp_set_rumble_motor = 0x8F000138;
 diff -ru a/patches/widescreen.c b/patches/widescreen.c
 --- a/patches/widescreen.c	2026-10-22 17:41:51.798153100 -0400
-+++ b/patches/widescreen.c	2026-10-22 17:57:44.421235900 -0400
-@@ -531,4 +531,40 @@
++++ b/patches/widescreen.c	2026-10-25 12:31:47.747294400 -0400
+@@ -14,6 +14,13 @@
+ }
+ #endif
+ 
++/* GoldenPad: sets the aspect mode of the base projection matrix group (no
++ * push, so nothing to pop). The game's rt64_extended_gbi.h predates the
++ * aspect field of G_EX_MATRIXGROUP_V1, so the current layout is encoded here. */
++#define GOLDENPAD_EX_ASPECT_AUTO 0x0
++#define GOLDENPAD_EX_ASPECT_ADJUST 0x2
++#define goldenpadProjectionAspect(cmd, aspect)                                              G_EX_COMMAND2(cmd,                                                                          PARAM(RT64_EXTENDED_OPCODE, 8, 24) | PARAM(G_EX_MATRIXGROUP_V1, 24, 0),                G_EX_ID_IGNORE,                                                                          PARAM(G_EX_NOPUSH, 1, 0) | PARAM(1, 1, 1) | PARAM(G_EX_INTERPOLATE_SIMPLE, 1, 2) |         PARAM(G_EX_COMPONENT_SKIP, 2, 3) | PARAM(G_EX_COMPONENT_SKIP, 2, 5) |                  PARAM(G_EX_COMPONENT_SKIP, 2, 7) | PARAM(G_EX_COMPONENT_SKIP, 2, 9) |                  PARAM(G_EX_COMPONENT_SKIP, 2, 11) | PARAM(G_EX_COMPONENT_SKIP, 2, 13) |                PARAM(G_EX_COMPONENT_SKIP, 2, 15) | PARAM(G_EX_ORDER_LINEAR, 2, 17) |                  PARAM(G_EX_EDIT_ALLOW, 1, 19) | PARAM((aspect), 2, 20) |                               PARAM(G_EX_COMPONENT_SKIP, 2, 22) | PARAM(G_EX_COMPONENT_SKIP, 2, 24),                 0)
++
+ // Set viewports (single player)
+ #if 1
+ RECOMP_PATCH Gfx* zbufClearCurrentPlayer(Gfx* gdl) {
+@@ -32,6 +39,13 @@
+         clear_buffer -= SCREEN_WIDTH * SCREEN_HEIGHT;
+     }
+ 
++    // GoldenPad: each player's 3D view starts here, so widen every projection
++    // in levels for widescreen. RT64's automatic mode only widens draws whose
++    // scissor spans the whole screen; rooms seen through a portal are clipped
++    // to it, so they kept the 4:3 projection and left misaligned, clipped gaps.
++    goldenpadProjectionAspect(gdl++, g_StageNum != LEVELID_TITLE
++        ? GOLDENPAD_EX_ASPECT_ADJUST : GOLDENPAD_EX_ASPECT_AUTO);
++
+     gDPPipeSync(gdl++);
+     gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
+     gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, z_buffer_width, OS_K0_TO_PHYSICAL(clear_buffer));
+@@ -531,4 +545,40 @@
      // @recomp: force rumble pak plugged in.
      g_ContRumblePakInitState[index] = 1;
  }
@@ -393,33 +421,3 @@ diff -ru a/patches/widescreen.c b/patches/widescreen.c
 +    }
 +}
  #endif
-diff -ru a/patches/workbench_theboy.c b/patches/workbench_theboy.c
---- a/patches/workbench_theboy.c	2026-10-25 12:16:55.964240000 -0400
-+++ b/patches/workbench_theboy.c	2026-10-25 12:17:09.789746900 -0400
-@@ -1,5 +1,13 @@
- #include "patches.h"
- 
-+/* Sets the aspect mode of the base projection matrix group (no push, so
-+ * nothing to pop; RT64 matrix groups otherwise reset each display list).
-+ * The game's rt64_extended_gbi.h predates the aspect field of
-+ * G_EX_MATRIXGROUP_V1, so the current layout is encoded here. */
-+#define GOLDENPAD_EX_ASPECT_AUTO 0x0
-+#define GOLDENPAD_EX_ASPECT_ADJUST 0x2
-+#define goldenpadProjectionAspect(cmd, aspect)                                              G_EX_COMMAND2(cmd,                                                                          PARAM(RT64_EXTENDED_OPCODE, 8, 24) | PARAM(G_EX_MATRIXGROUP_V1, 24, 0),                G_EX_ID_IGNORE,                                                                          PARAM(G_EX_NOPUSH, 1, 0) | PARAM(1, 1, 1) | PARAM(G_EX_INTERPOLATE_SIMPLE, 1, 2) |         PARAM(G_EX_COMPONENT_SKIP, 2, 3) | PARAM(G_EX_COMPONENT_SKIP, 2, 5) |                  PARAM(G_EX_COMPONENT_SKIP, 2, 7) | PARAM(G_EX_COMPONENT_SKIP, 2, 9) |                  PARAM(G_EX_COMPONENT_SKIP, 2, 11) | PARAM(G_EX_COMPONENT_SKIP, 2, 13) |                PARAM(G_EX_COMPONENT_SKIP, 2, 15) | PARAM(G_EX_ORDER_LINEAR, 2, 17) |                  PARAM(G_EX_EDIT_ALLOW, 1, 19) | PARAM((aspect), 2, 20) |                               PARAM(G_EX_COMPONENT_SKIP, 2, 22) | PARAM(G_EX_COMPONENT_SKIP, 2, 24),                 0)
-+
- int demoMode = 0;
- 
- void waitForNextFrame2();  // @theboy181 - Improtant for proper fps
-@@ -853,6 +861,12 @@
- 
-                             gEXEnable(gdl++); // @theboy181 - better place for this 
-                             gEXSetRefreshRate(gdl++, 60 / speedgraphframes); // @theboy181
-+                            // GoldenPad: in levels, widen every projection for widescreen.
-+                            // RT64's default only widens draws whose scissor spans the whole
-+                            // screen, so rooms seen through a portal (clipped to the portal)
-+                            // kept the 4:3 projection, misaligned and partly clipped away.
-+                            goldenpadProjectionAspect(gdl++, g_StageNum != LEVELID_TITLE
-+                                ? GOLDENPAD_EX_ASPECT_ADJUST : GOLDENPAD_EX_ASPECT_AUTO);
- 
-                             //recomp_printf("gunbarrel_mode = %d\n", speedgraphframes);
- 

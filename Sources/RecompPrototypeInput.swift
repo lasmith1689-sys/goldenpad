@@ -3,6 +3,7 @@ import Foundation
 import GameController
 import QuartzCore
 import SwiftUI
+import UIKit
 import simd
 
 @_silgen_name("goldenpad_recomp_set_controller_state")
@@ -1357,12 +1358,54 @@ struct RecompLookSurface: View {
     }
 }
 
+/// Light tick on touch-down so a press is felt even when the thumb hides the
+/// button. One shared generator keeps the latency low.
+@MainActor
+enum RecompTouchHaptics {
+    private static let generator: UIImpactFeedbackGenerator = {
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        return generator
+    }()
+
+    static func press() {
+        generator.impactOccurred(intensity: 0.7)
+        generator.prepare()
+    }
+}
+
+/// Clear pressed state shared by the touch buttons: shrink, brighten, glow.
+private struct RecompPressedStyle: ViewModifier {
+    let pressed: Bool
+    let tint: Color
+    let pressedTint: Color
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(pressed ? .black : .white.opacity(0.96))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(pressed ? pressedTint : tint.opacity(0.56), in: Circle())
+            .overlay(Circle().fill(.white.opacity(pressed ? 0.30 : 0)))
+            .overlay(Circle().stroke(.white.opacity(pressed ? 0.95 : 0.52), lineWidth: pressed ? 3 : 1))
+            .shadow(color: pressedTint.opacity(pressed ? 0.9 : 0), radius: pressed ? 10 : 0)
+            .scaleEffect(pressed ? 0.88 : 1)
+            .animation(.easeOut(duration: 0.06), value: pressed)
+    }
+}
+
 struct RecompMomentaryButton: View {
+    /// GoldenEye polls input only every 2-3 display frames, so a quick tap can
+    /// start and end between two polls and never register. Every press is
+    /// held for at least this long before its release is published.
+    static let minimumPressDuration: TimeInterval = 0.10
+
     let title: String
     let tint: Color
     let pressedTint: Color
     let onChange: (Bool) -> Void
     @State private var pressed = false
+    @State private var pressStarted: Date?
+    @State private var pressToken = 0
 
     init(
         title: String,
@@ -1383,18 +1426,31 @@ struct RecompMomentaryButton: View {
             .minimumScaleFactor(0.42)
             .allowsTightening(true)
             .padding(.horizontal, 4)
-            .foregroundStyle(pressed ? .black : .white.opacity(0.96))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(pressed ? pressedTint : tint.opacity(0.56), in: Circle())
-            .overlay(Circle().stroke(.white.opacity(0.52), lineWidth: 1))
+            .modifier(RecompPressedStyle(pressed: pressed, tint: tint, pressedTint: pressedTint))
             .contentShape(Circle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { _ in
                 guard !pressed else { return }
                 pressed = true
+                pressStarted = Date()
+                pressToken += 1
+                RecompTouchHaptics.press()
                 onChange(true)
             }.onEnded { _ in
                 pressed = false
-                onChange(false)
+                let held = pressStarted.map { Date().timeIntervalSince($0) } ?? Self.minimumPressDuration
+                pressStarted = nil
+                let remaining = Self.minimumPressDuration - held
+                guard remaining > 0 else {
+                    onChange(false)
+                    return
+                }
+                // Release later unless the button was pressed again meanwhile.
+                let token = pressToken
+                DispatchQueue.main.asyncAfter(deadline: .now() + remaining) {
+                    if token == pressToken && !pressed {
+                        onChange(false)
+                    }
+                }
             })
             .accessibilityLabel(title)
     }
@@ -1406,24 +1462,31 @@ struct RecompToggleButton: View {
     let activeTint: Color
     let isOn: Bool
     let onToggle: () -> Void
+    @State private var touching = false
 
     var body: some View {
-        Button(action: onToggle) {
-            Text(title)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.42)
-                .allowsTightening(true)
-                .padding(.horizontal, 4)
-                .foregroundStyle(isOn ? .black : .white.opacity(0.96))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(isOn ? activeTint : tint.opacity(0.56), in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.52), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .contentShape(Circle())
-        .accessibilityLabel(title)
-        .accessibilityValue(isOn ? "Locked" : "Off")
-        .accessibilityHint("Tap to lock aim so look and fire remain available")
+        // Toggles on touch-down: a Button fires only on release and cancels if
+        // the thumb drifts, which dropped presses during play.
+        Text(title)
+            .font(.system(size: 12, weight: .bold, design: .rounded))
+            .lineLimit(1)
+            .minimumScaleFactor(0.42)
+            .allowsTightening(true)
+            .padding(.horizontal, 4)
+            .modifier(RecompPressedStyle(pressed: isOn, tint: tint, pressedTint: activeTint))
+            .scaleEffect(touching && !isOn ? 0.92 : 1)
+            .contentShape(Circle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { _ in
+                guard !touching else { return }
+                touching = true
+                RecompTouchHaptics.press()
+                onToggle()
+            }.onEnded { _ in
+                touching = false
+            })
+            .accessibilityLabel(title)
+            .accessibilityValue(isOn ? "Locked" : "Off")
+            .accessibilityHint("Tap to lock aim so look and fire remain available")
+            .accessibilityAddTraits(.isButton)
     }
 }

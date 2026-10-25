@@ -28,6 +28,28 @@ enum RecompPrototypeResolutionMode: String, CaseIterable {
     }
 }
 
+enum RecompPrototypeAspectMode: String, CaseIterable {
+    case original
+    case widescreen
+    case full
+
+    var title: String {
+        switch self {
+        case .original: "Original 4:3"
+        case .widescreen: "16:9"
+        case .full: "Full screen"
+        }
+    }
+
+    var nativeValue: Int32 {
+        switch self {
+        case .original: 0
+        case .widescreen: 1
+        case .full: 2
+        }
+    }
+}
+
 @main
 struct GoldenPadApp: App {
     @StateObject private var romStore = RecompPrototypeROMStore()
@@ -57,7 +79,7 @@ struct GoldenPadApp: App {
     @AppStorage("recomp.resolutionMode") private var resolutionMode = RecompPrototypeResolutionMode.automatic.rawValue
     @AppStorage("recomp.threePointFiltering") private var threePointFiltering = true
     @AppStorage("recomp.texturedSky") private var texturedSky = true
-    @AppStorage("recomp.widescreen") private var widescreen = true
+    @AppStorage("recomp.aspectMode") private var aspectMode = RecompPrototypeAspectMode.widescreen.rawValue
     @AppStorage("recomp.unlockAllMissions") private var unlockAllMissions = false
     @AppStorage("recomp.twoPlayerTestMode") private var twoPlayerTestMode = false
     @AppStorage("recomp.fourPlayerTestMode") private var fourPlayerTestMode = false
@@ -308,7 +330,7 @@ struct GoldenPadApp: App {
                         resolutionMode: $resolutionMode,
                         threePointFiltering: $threePointFiltering,
                         texturedSky: $texturedSky,
-                        widescreen: $widescreen,
+                        aspectMode: $aspectMode,
                         unlockAllMissions: $unlockAllMissions,
                         twoPlayerTestMode: $twoPlayerTestMode,
                         fourPlayerTestMode: $fourPlayerTestMode,
@@ -349,7 +371,7 @@ struct GoldenPadApp: App {
             msaaEnabled: msaaEnabled,
             resolutionMode: RecompPrototypeResolutionMode(rawValue: resolutionMode) ?? .automatic,
             threePointFiltering: threePointFiltering,
-            widescreen: widescreen)
+            aspectMode: RecompPrototypeAspectMode(rawValue: aspectMode) ?? .widescreen)
         if lanNetplay.isPlaying {
             // The four-player composite is 4:3, and every quadrant is also
             // 4:3. Establish that source frame before scaling so iPhone does
@@ -679,7 +701,7 @@ private struct RecompPrototypeSettingsView: View {
     @Binding var resolutionMode: String
     @Binding var threePointFiltering: Bool
     @Binding var texturedSky: Bool
-    @Binding var widescreen: Bool
+    @Binding var aspectMode: String
     @Binding var unlockAllMissions: Bool
     @Binding var twoPlayerTestMode: Bool
     @Binding var fourPlayerTestMode: Bool
@@ -703,8 +725,12 @@ private struct RecompPrototypeSettingsView: View {
                     }
                     Toggle("2× anti-aliasing", isOn: $msaaEnabled)
                     Toggle("N64 three-point texture filtering", isOn: $threePointFiltering)
-                    Toggle("Widescreen", isOn: $widescreen)
-                    Text("Fills the screen with a wider view; off keeps the original 4:3 picture. Applies immediately.")
+                    Picker("Aspect ratio", selection: $aspectMode) {
+                        ForEach(RecompPrototypeAspectMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
+                    Text("16:9 shows a wider view than the original without the stretched edges and missing walls of Full screen. Applies immediately.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Toggle("Textured sky", isOn: $texturedSky)

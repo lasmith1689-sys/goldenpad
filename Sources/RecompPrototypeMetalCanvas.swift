@@ -20,7 +20,7 @@ private func goldenPadRecompSetResolutionMode(_ mode: Int32)
 private func goldenPadRecompSetThreePointFiltering(_ enabled: Int32)
 
 @_silgen_name("goldenpad_recomp_set_widescreen")
-private func goldenPadRecompSetWidescreen(_ enabled: Int32)
+private func goldenPadRecompSetWidescreen(_ mode: Int32)
 
 @_silgen_name("goldenpad_recomp_set_app_active")
 private func goldenPadRecompSetAppActive(_ active: Int32)
@@ -181,7 +181,7 @@ struct RecompPrototypeMetalCanvas: UIViewRepresentable {
     let msaaEnabled: Bool
     let resolutionMode: RecompPrototypeResolutionMode
     let threePointFiltering: Bool
-    let widescreen: Bool
+    let aspectMode: RecompPrototypeAspectMode
 
     func makeCoordinator() -> Renderer { Renderer(surface: surface) }
 
@@ -189,7 +189,7 @@ struct RecompPrototypeMetalCanvas: UIViewRepresentable {
         goldenPadRecompSetMSAAEnabled(msaaEnabled ? 1 : 0)
         goldenPadRecompSetResolutionMode(resolutionMode.nativeValue)
         goldenPadRecompSetThreePointFiltering(threePointFiltering ? 1 : 0)
-        goldenPadRecompSetWidescreen(widescreen ? 1 : 0)
+        goldenPadRecompSetWidescreen(aspectMode.nativeValue)
         let view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
         view.colorPixelFormat = .bgra8Unorm
         // Keep any sub-pixel surface edge neutral. The old blue clear color
@@ -214,7 +214,7 @@ struct RecompPrototypeMetalCanvas: UIViewRepresentable {
         goldenPadRecompSetMSAAEnabled(msaaEnabled ? 1 : 0)
         goldenPadRecompSetResolutionMode(resolutionMode.nativeValue)
         goldenPadRecompSetThreePointFiltering(threePointFiltering ? 1 : 0)
-        goldenPadRecompSetWidescreen(widescreen ? 1 : 0)
+        goldenPadRecompSetWidescreen(aspectMode.nativeValue)
     }
 
     static func dismantleUIView(_ view: MTKView, coordinator: Renderer) {

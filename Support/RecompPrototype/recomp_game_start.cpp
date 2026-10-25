@@ -75,7 +75,7 @@ std::array<std::atomic<bool>, kControllerPorts> reloadRequested{};
 std::atomic<bool> prototypeMsaaEnabled = true;
 std::atomic<int32_t> prototypeResolutionMode = 2;
 std::atomic<bool> prototypeThreePointFiltering = true;
-std::atomic<bool> prototypeWidescreen = true;
+std::atomic<int32_t> prototypeAspectMode = 1;
 std::atomic<bool> invertAimY = false;
 std::atomic<bool> unlockAllMissions = false;
 std::atomic<bool> texturedSky = true;
@@ -834,6 +834,17 @@ void queueClampedAxis(std::atomic<int32_t> &axis, int32_t delta) {
         std::memory_order_relaxed)) {}
 }
 
+// 0 = original 4:3, 1 = 16:9 (RT64 Manual, default target 16:9), 2 = fill the
+// display (Expand). Wider than 16:9 shows level edges the game never meant
+// to draw (it culls rooms by its own 4:3 view), so 16:9 is the default.
+ultramodern::renderer::AspectRatio prototypeAspectOption(int32_t mode) {
+    switch (mode) {
+    case 0: return ultramodern::renderer::AspectRatio::Original;
+    case 2: return ultramodern::renderer::AspectRatio::Expand;
+    default: return ultramodern::renderer::AspectRatio::Manual;
+    }
+}
+
 void configurePrototypeGraphics() {
     ultramodern::renderer::GraphicsConfig graphics{};
     // Match GoldenEye64Recomp's intended remastered defaults. The zero-filled
@@ -853,11 +864,7 @@ void configurePrototypeGraphics() {
     graphics.wm_option = ultramodern::renderer::WindowMode::Fullscreen;
     graphics.hr_option = ultramodern::renderer::HUDRatioMode::Clamp16x9;
     graphics.api_option = ultramodern::renderer::GraphicsApi::Metal;
-    // Widescreen expands the 3D view to the display; off keeps the original
-    // 4:3 frame (pillarboxed), which also isolates widescreen-only artifacts.
-    graphics.ar_option = prototypeWidescreen.load(std::memory_order_relaxed)
-        ? ultramodern::renderer::AspectRatio::Expand
-        : ultramodern::renderer::AspectRatio::Original;
+    graphics.ar_option = prototypeAspectOption(prototypeAspectMode.load(std::memory_order_relaxed));
     const bool msaaEnabled = prototypeMsaaEnabled.load(std::memory_order_relaxed);
     graphics.msaa_option = msaaEnabled
         ? ultramodern::renderer::Antialiasing::MSAA2X
@@ -878,7 +885,8 @@ void configurePrototypeGraphics() {
             : "automatic high resolution";
     logEvent("graphics", "Metal %s, %s aspect, %s, %s, original refresh",
         resolution,
-        prototypeWidescreen.load(std::memory_order_relaxed) ? "expanded" : "original 4:3",
+        prototypeAspectMode.load(std::memory_order_relaxed) == 0 ? "original 4:3"
+            : prototypeAspectMode.load(std::memory_order_relaxed) == 1 ? "16:9" : "expanded",
         msaaEnabled ? "2x MSAA" : "MSAA off",
         prototypeThreePointFiltering.load(std::memory_order_relaxed)
             ? "three-point filtering" : "linear filtering");
@@ -1669,21 +1677,19 @@ extern "C" void goldenpad_recomp_set_three_point_filtering(int32_t enabled) {
     }
 }
 
-extern "C" void goldenpad_recomp_set_widescreen(int32_t enabled) {
-    const bool next = enabled != 0;
-    if (prototypeWidescreen.exchange(next, std::memory_order_relaxed) == next ||
+extern "C" void goldenpad_recomp_set_widescreen(int32_t mode) {
+    const int32_t next = std::clamp(mode, 0, 2);
+    if (prototypeAspectMode.exchange(next, std::memory_order_relaxed) == next ||
         !runtimeStarted.load(std::memory_order_relaxed)) {
         return;
     }
     // Aspect ratio is safe to change live (RT64Context::update_config only
     // re-applies the user config; MSAA and resolution keep their launch values
-    // because only ar_option changes here), so the switch applies immediately.
+    // because only ar_option changes here), so the setting applies immediately.
     ultramodern::renderer::GraphicsConfig graphics = ultramodern::renderer::get_graphics_config();
-    graphics.ar_option = next
-        ? ultramodern::renderer::AspectRatio::Expand
-        : ultramodern::renderer::AspectRatio::Original;
+    graphics.ar_option = prototypeAspectOption(next);
     ultramodern::renderer::set_graphics_config(graphics);
-    logEvent("graphics", "aspect switched live to %s", next ? "expanded" : "original 4:3");
+    logEvent("graphics", "aspect switched live to mode %d", next);
 }
 
 extern "C" int32_t goldenpad_recomp_three_point_filtering_enabled() {

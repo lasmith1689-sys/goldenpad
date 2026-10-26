@@ -834,15 +834,15 @@ void queueClampedAxis(std::atomic<int32_t> &axis, int32_t delta) {
         std::memory_order_relaxed)) {}
 }
 
-// 0 = original 4:3, 1 = 16:9 (RT64 Manual, default target 16:9), 2 = fill the
-// display (Expand). Wider than 16:9 shows level edges the game never meant
-// to draw (it culls rooms by its own 4:3 view), so 16:9 is the default.
+// 0 = original 4:3, 1 = 16:9, 2 = fill the display (RT64 Expand).
+// 16:9 uses GoldenEye's own anamorphic 16:9 ratio: the game widens its own
+// field of view and room/portal culling and draws into the 4:3 frame, which
+// the host stretches to 16:9. RT64's Expand instead widens only the picture,
+// so rooms the game culled by its 4:3 view leave gaps; Full screen keeps it.
 ultramodern::renderer::AspectRatio prototypeAspectOption(int32_t mode) {
-    switch (mode) {
-    case 0: return ultramodern::renderer::AspectRatio::Original;
-    case 2: return ultramodern::renderer::AspectRatio::Expand;
-    default: return ultramodern::renderer::AspectRatio::Manual;
-    }
+    return mode == 2
+        ? ultramodern::renderer::AspectRatio::Expand
+        : ultramodern::renderer::AspectRatio::Original;
 }
 
 void configurePrototypeGraphics() {
@@ -1675,6 +1675,12 @@ extern "C" void goldenpad_recomp_set_three_point_filtering(int32_t enabled) {
     if (!runtimeStarted.load(std::memory_order_relaxed)) {
         prototypeThreePointFiltering.store(enabled != 0, std::memory_order_relaxed);
     }
+}
+
+// Read by the personal get_screen_ratio patch: SCREEN_RATIO_16_9 (1) for the
+// 16:9 setting, SCREEN_RATIO_NORMAL (0) otherwise.
+extern "C" void goldenpad_recomp_screen_ratio(uint8_t *, recomp_context *ctx) {
+    ctx->r2 = prototypeAspectMode.load(std::memory_order_relaxed) == 1 ? 1 : 0;
 }
 
 extern "C" void goldenpad_recomp_set_widescreen(int32_t mode) {

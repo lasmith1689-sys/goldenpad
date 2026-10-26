@@ -384,6 +384,19 @@ struct GoldenPadApp: App {
                 .clipped()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
+        } else if (RecompPrototypeAspectMode(rawValue: aspectMode) ?? .widescreen) == .widescreen {
+            // GoldenEye's own 16:9 mode draws a horizontally squeezed picture
+            // into its 4:3 frame (for widescreen TVs). Render that 4:3 frame
+            // and stretch it 4:3 -> 16:9, the way a widescreen TV did.
+            GeometryReader { geometry in
+                let height = min(geometry.size.height, geometry.size.width * 9.0 / 16.0)
+                canvas
+                    .frame(width: height * 4.0 / 3.0, height: height)
+                    .scaleEffect(x: 4.0 / 3.0, y: 1)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+            .clipped()
+            .ignoresSafeArea()
         } else {
             canvas
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -730,7 +743,7 @@ private struct RecompPrototypeSettingsView: View {
                             Text(mode.title).tag(mode.rawValue)
                         }
                     }
-                    Text("16:9 shows a wider view than the original without the stretched edges and missing walls of Full screen. Applies immediately.")
+                    Text("16:9 uses GoldenEye's own widescreen mode, so no walls go missing; on-screen text is slightly wider. Full screen fills the display but can show gaps near the edges. Applies immediately.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Toggle("Textured sky", isOn: $texturedSky)

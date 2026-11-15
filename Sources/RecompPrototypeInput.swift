@@ -20,6 +20,9 @@ private func goldenPadRecompSetRightAnalog(_ controller: Int32, _ x: Int32, _ y:
 @_silgen_name("goldenpad_recomp_set_controller_connected")
 private func goldenPadRecompSetControllerConnected(_ connected: Int32)
 
+@_silgen_name("goldenpad_recomp_set_remote_ports")
+private func goldenPadRecompSetRemotePorts(_ mask: Int32)
+
 @_silgen_name("goldenpad_recomp_set_touch_input_port")
 private func goldenPadRecompSetTouchInputPort(_ port: Int32)
 
@@ -303,6 +306,12 @@ final class RecompPrototypeInput: ObservableObject {
     @Published private(set) var twoPlayerTestModeActive = false
     @Published private(set) var fourPlayerTestModeActive = false
     @Published private(set) var touchControlsVisible = true
+    /// Apple TV: phones acting as controllers (players 1-4 beside any gamepad).
+    var remoteHost: RemoteControllerHost?
+    /// iPhone: when connected, the touch controls drive an Apple TV instead.
+    var remoteClient: RemoteControllerClient?
+    private var remoteCrouchPresses: UInt8 = 0
+    private var remotePortsMask: Int32 = -1
     private var touchButtons: UInt16 = 0
     private var touchFireState = RecompTouchFireState()
     private var touchMovement = SIMD2<Float>.zero
@@ -505,10 +514,20 @@ final class RecompPrototypeInput: ObservableObject {
     }
 
     private var ownershipRoute: InputOwnershipRoute {
-        InputOwnershipRouter.route(
+        var route = InputOwnershipRouter.route(
             controllerPresent: controller != nil,
             twoPlayerRequested: twoPlayerTestModeRequested
         )
+        #if os(tvOS)
+        // No touch screen: every player other than a paired gamepad is a phone.
+        route.touchPort = nil
+        route.twoPlayerActive = false
+        #endif
+        return route
+    }
+
+    private var phoneIsRemoteController: Bool {
+        remoteClient?.isConnected ?? false
     }
 
     private func updateTestModes(
@@ -545,7 +564,9 @@ final class RecompPrototypeInput: ObservableObject {
     }
 
     func setCrouchPressed(_ pressed: Bool) {
-        if pressed && !touchCrouchIsPressed, let touchPort = ownershipRoute.touchPort {
+        if pressed && !touchCrouchIsPressed && phoneIsRemoteController {
+            remoteCrouchPresses &+= 1
+        } else if pressed && !touchCrouchIsPressed, let touchPort = ownershipRoute.touchPort {
             if let lanNetplay, lanNetplay.isPlaying, touchPort == 0 {
                 lanNetplay.requestLocalCrouchToggle()
             } else {
@@ -624,6 +645,11 @@ final class RecompPrototypeInput: ObservableObject {
         if hostInputSuspended {
             touchLook = .zero
             controllerRumble.update(active: false)
+            if phoneIsRemoteController {
+                var neutral = RemoteControllerInput()
+                neutral.crouchPresses = remoteCrouchPresses
+                remoteClient?.send(neutral)
+            }
             publishNeutralControllers()
             return
         }
@@ -636,6 +662,17 @@ final class RecompPrototypeInput: ObservableObject {
 
         let queuedTouchLook = clamp(touchLook * lookSensitivity)
         touchLook = .zero
+        if phoneIsRemoteController, let remoteClient {
+            // This iPhone is a controller for an Apple TV: the touch controls
+            // go there raw, and the TV maps them like its own touch input.
+            var frame = RemoteControllerInput()
+            frame.buttons = touchButtons
+            frame.stick = touchMovement
+            frame.look = queuedTouchLook
+            frame.crouchPresses = remoteCrouchPresses
+            remoteClient.send(frame)
+            return
+        }
         var externalButtons: UInt16 = 0
         var externalStick = SIMD2<Float>.zero
         var controllerLook = SIMD2<Float>.zero
@@ -758,6 +795,23 @@ final class RecompPrototypeInput: ObservableObject {
 
         let route = ownershipRoute
         let gameplayActive = goldenPadRecompGameplayInputActive() != 0
+        let remoteFrames = remoteHost?.tick(
+            reservedPort: route.externalPort.map(Int.init),
+            rumble: { goldenPadRecompGetRumble(Int32($0)) != 0 }
+        ) ?? []
+        var remoteByPort: [Int32: RemotePlayerFrame] = [:]
+        var nextRemoteMask: Int32 = 0
+        for frame in remoteFrames {
+            let port = Int32(frame.port)
+            remoteByPort[port] = frame
+            nextRemoteMask |= Int32(1) << port
+            if frame.crouchPresses % 2 == 1 { goldenPadRecompRequestCrouchToggle(port) }
+            if frame.reloadPresses > 0 { goldenPadRecompRequestReload(port) }
+        }
+        if nextRemoteMask != remotePortsMask {
+            remotePortsMask = nextRemoteMask
+            goldenPadRecompSetRemotePorts(nextRemoteMask)
+        }
 
         if !gameplayActive {
             activeControlStyle = -1
@@ -784,6 +838,13 @@ final class RecompPrototypeInput: ObservableObject {
                         stick: touchMovement,
                         look: .zero
                     )
+                } else if let remote = remoteByPort[resolvedPort] {
+                    publishController(
+                        port: resolvedPort,
+                        buttons: remote.buttons,
+                        stick: remote.stick,
+                        look: .zero
+                    )
                 } else {
                     publishController(port: resolvedPort, buttons: 0, stick: .zero, look: .zero)
                 }
@@ -791,6 +852,7 @@ final class RecompPrototypeInput: ObservableObject {
             if queuedTouchLook != .zero, let touchPort = route.touchPort {
                 publishTouchLook(queuedTouchLook, port: touchPort)
             }
+            publishRemoteLook(remoteFrames)
             return
         }
 
@@ -878,12 +940,51 @@ final class RecompPrototypeInput: ObservableObject {
                     stick: mappedTouchMovement.stick,
                     look: .zero
                 )
+            } else if let remote = remoteByPort[resolvedPort] {
+                let movement = remoteGameplayMovement(remote)
+                publishController(
+                    port: resolvedPort,
+                    buttons: movement.buttons,
+                    stick: movement.stick,
+                    look: .zero
+                )
             } else {
                 publishController(port: resolvedPort, buttons: 0, stick: .zero, look: .zero)
             }
         }
         if queuedTouchLook != .zero, let touchPort = route.touchPort {
             publishTouchLook(queuedTouchLook, port: touchPort)
+        }
+        publishRemoteLook(remoteFrames)
+    }
+
+    /// A phone's touch controls on the TV, mapped exactly like local touch:
+    /// the phone sends raw Fire/Aim/Action/Weapon/Start and its stick.
+    private func remoteGameplayMovement(_ frame: RemotePlayerFrame) -> (buttons: UInt16, stick: SIMD2<Float>) {
+        var context = runtimeInputContext(port: Int32(frame.port))
+        context.gameplayActive = true
+        let aim = frame.buttons & N64.r != 0
+        context.aiming = context.aiming || aim
+        let mapping = RecompControlMapping(runtimeStyle: context.runtimeStyle)
+        let buttons = mapping.gameplayButtons(
+            fire: frame.buttons & N64.z != 0,
+            aim: aim,
+            action: frame.buttons & N64.b != 0,
+            weapon: frame.buttons & N64.a != 0,
+            start: frame.buttons & N64.start != 0
+        )
+        let movement = mapping.movement(
+            buttons: buttons,
+            stick: frame.stick,
+            modern: true,
+            context: context
+        )
+        return (movement.buttons, movement.stick)
+    }
+
+    private func publishRemoteLook(_ frames: [RemotePlayerFrame]) {
+        for frame in frames where frame.look != .zero {
+            publishTouchLook(clamp(frame.look), port: Int32(frame.port))
         }
     }
 

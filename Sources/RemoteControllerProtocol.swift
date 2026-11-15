@@ -191,7 +191,10 @@ struct RemotePlayerMixer {
         guard var phone = phones[id] else { return }
         phone.latest = input
         phone.receivedAt = now
-        phone.look += input.look
+        // Cap what one phone can queue between ticks (a fast flick is ~1).
+        let look = phone.look + input.look
+        let length = (look * look).sum().squareRoot()
+        phone.look = length > 4 ? look * (4 / length) : look
         // Counters only ever grow (wrapping at 256): the difference since
         // the last frame is how many presses happened, so a merged frame
         // never loses a press. The first frame sets the baseline.

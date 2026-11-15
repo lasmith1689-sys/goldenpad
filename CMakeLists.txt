@@ -52,7 +52,7 @@ endif()
 # and Top Shelf art, a TV Info.plist, and the Apple TV device family.
 if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
     set(goldenpad_mobile_assets AssetsTV.xcassets)
-    set(goldenpad_mobile_app_icon "App Icon & Top Shelf Image")
+    set(goldenpad_mobile_app_icon "TVAppIcon")
     set(goldenpad_mobile_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/Config/RecompPrototypeInfoTV.plist.in")
     set(goldenpad_mobile_platforms "appletvos appletvsimulator")
     set(goldenpad_mobile_device_family "3")
@@ -563,6 +563,10 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
         Sources/RecompPrototypeInput.swift
         Sources/LANNetplayCoordinator.swift
         Sources/LANNetplayProtocol.swift
+        Sources/RemoteControllerProtocol.swift
+        Sources/RemoteControllerSession.swift
+        Sources/RemoteControllerTransport.swift
+        Sources/RemoteControllerViews.swift
         Sources/RecompPrototypeMetalCanvas.swift
         Sources/RecompPrototypeROMStore.swift
         Sources/RecompTouchFireState.swift

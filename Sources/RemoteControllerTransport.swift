@@ -10,7 +10,8 @@ enum RemoteControllerNetwork {
         tcp.noDelay = true
         tcp.connectionTimeout = 5
         let parameters = NWParameters(tls: nil, tcp: tcp)
-        parameters.includePeerToPeer = true
+        // Same Wi-Fi network only; no ad-hoc peer-to-peer links.
+        parameters.includePeerToPeer = false
         return parameters
     }
 
@@ -65,7 +66,14 @@ final class RemoteControllerServer {
         listener.start(queue: queue)
     }
 
+    /// Four players plus a couple waiting for one to leave; any more are refused.
+    static let maxConnections = RemoteControllerWire.maxPlayers + 2
+
     private func accept(_ connection: NWConnection) {
+        guard connections.count < Self.maxConnections else {
+            connection.cancel()
+            return
+        }
         let id = UUID()
         connections[id] = connection
         var ended = false

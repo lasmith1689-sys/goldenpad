@@ -28,3 +28,43 @@ jobs:
           swiftc -O Sources/RemoteControllerProtocol.swift Sources/RemoteControllerTransport.swift \
             Tests/RemoteControllerLoopbackTest.swift -parse-as-library -o "$RUNNER_TEMP/remote-controller-loopback"
           "$RUNNER_TEMP/remote-controller-loopback"
+
+  apple-compile:
+    name: App Swift compiles for iPhone and Apple TV; Apple TV icons compile
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Pick the newest Xcode 26
+        run: |
+          xcode=$(for x in /Applications/Xcode_26*.app; do [ -L "$x" ] || echo "$x"; done | sort -V | tail -n 1)
+          xcode=$(cd "$xcode" && pwd -P)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          echo "Using $xcode"
+      - name: Type-check the app's Swift (no game code needed)
+        run: |
+          files="Sources/GoldenPadDiagnostics.swift Sources/GoldenPadIssueReport.swift
+            Sources/RecompPrototypeApp.swift Sources/RecompPrototypeAudio.swift Sources/RecompControlMapping.swift
+            Sources/RecompPrototypeInput.swift Sources/LANNetplayCoordinator.swift Sources/LANNetplayProtocol.swift
+            Sources/RemoteControllerProtocol.swift Sources/RemoteControllerSession.swift
+            Sources/RemoteControllerTransport.swift Sources/RemoteControllerViews.swift
+            Sources/RecompPrototypeMetalCanvas.swift Sources/RecompPrototypeROMStore.swift
+            Sources/RecompTouchFireState.swift Sources/RecompPrototypeTouchLayout.swift"
+          status=0
+          for target in iphoneos:arm64-apple-ios17.0 appletvos:arm64-apple-tvos17.0; do
+            sdk=${target%%:*}; triple=${target#*:}
+            echo "== $sdk"
+            xcrun --sdk "$sdk" swiftc -typecheck -swift-version 5 -target "$triple" $files || status=1
+          done
+          exit $status
+      - name: Compile the Apple TV icon catalog
+        run: |
+          out="$RUNNER_TEMP/actool"; mkdir -p "$out"
+          xcrun actool AssetsTV.xcassets --compile "$out" --platform appletvos \
+            --minimum-deployment-target 17.0 --target-device tv --app-icon TVAppIcon \
+            --output-partial-info-plist "$out/partial.plist" \
+            --output-format human-readable-text --notices --warnings --errors
+          ls -la "$out"
+          plutil -p "$out/partial.plist"

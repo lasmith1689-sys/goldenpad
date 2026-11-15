@@ -58,6 +58,10 @@ struct GoldenPadApp: App {
     @StateObject private var audio = RecompPrototypeAudio()
     @StateObject private var touchLayout = RecompTouchLayoutStore()
     @StateObject private var lanNetplay = LANNetplayCoordinator()
+    @StateObject private var remoteHost = RemoteControllerHost()
+    @StateObject private var remoteClient = RemoteControllerClient()
+    @State private var phoneLaunchMode = PhoneLaunchMode.initial
+    @AppStorage("recomp.lastLaunchedAsController") private var lastLaunchedAsController = false
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("recomp.lookSensitivity") private var lookSensitivity = 4.0
     @AppStorage("recomp.aimBehavior") private var aimBehavior = RecompPrototypeAimBehavior.toggle.rawValue
@@ -128,7 +132,9 @@ struct GoldenPadApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if romStore.isReady {
+                if romStore.isReady && phoneLaunchMode != .game {
+                    phoneControllerView
+                } else if romStore.isReady {
                     if lanLabEnabled && !offlineLaunchRequested && !lanNetplay.gameLaunchAuthorized {
                         LANNetplayLaunchView(
                             coordinator: lanNetplay,
@@ -169,6 +175,12 @@ struct GoldenPadApp: App {
                     )
                         .ignoresSafeArea()
                 }
+                #endif
+                #if os(tvOS)
+                RemoteControllerTVOverlay(
+                    host: remoteHost,
+                    hasGamepad: input.externalControllerName != nil
+                )
                 #endif
                 GeometryReader { geometry in
                     ZStack(alignment: .topLeading) {
@@ -213,6 +225,10 @@ struct GoldenPadApp: App {
             }
             .onAppear {
                 input.lanNetplay = lanNetplay
+                #if os(tvOS)
+                input.remoteHost = remoteHost
+                remoteHost.start()
+                #endif
                 input.configureLookSensitivity(lookSensitivity)
                 input.configureAimBehavior(aimBehavior)
                 input.configureControllerLookMode(controllerLookMode)
@@ -367,6 +383,37 @@ struct GoldenPadApp: App {
                 if romStore.isReady { isUtilityMenuPresented.toggle() }
             }
         }
+    }
+
+    @ViewBuilder
+    private var phoneControllerView: some View {
+        #if os(tvOS)
+        EmptyView()
+        #else
+        switch phoneLaunchMode {
+        case .choosing:
+            RemoteControllerLaunchView(
+                client: remoteClient,
+                mode: $phoneLaunchMode,
+                preferController: lastLaunchedAsController)
+            .onDisappear {
+                if phoneLaunchMode == .game { lastLaunchedAsController = false }
+            }
+        case .controller, .game:
+            RemoteControllerPadView(
+                client: remoteClient,
+                input: input,
+                placements: touchLayout.placements(for: touchDeviceClass),
+                deviceClass: touchDeviceClass,
+                mode: $phoneLaunchMode)
+            .onAppear {
+                lastLaunchedAsController = true
+                input.remoteClient = remoteClient
+                input.configureLookSensitivity(lookSensitivity)
+                input.configureAimBehavior(aimBehavior)
+            }
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -1060,7 +1107,7 @@ private struct GoldenPadSlider: View {
 
     var body: some View {
         #if os(tvOS)
-        Stepper(String(format: "%.2f×", value), value: $value, in: range, step: step)
+        Stepper(String(format: "%.2fÃ—", value), value: $value, in: range, step: step)
         #else
         Slider(value: $value, in: range, step: step)
         #endif

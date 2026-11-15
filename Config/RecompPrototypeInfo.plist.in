@@ -40,10 +40,11 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>GoldenPad uses your local network to discover and connect to nearby LAN Netplay Lab rooms.</string>
+    <string>GoldenPad uses your local network to find an Apple TV running GoldenPad, so this iPhone can be its controller.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_gpad-netplay._tcp</string>
+        <string>_gpad-ctrl._tcp</string>
     </array>
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>

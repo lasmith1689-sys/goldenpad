@@ -20,6 +20,7 @@ extern "C" void goldenpad_recomp_set_right_analog(int32_t, int32_t, int32_t) {}
 extern "C" int32_t goldenpad_recomp_get_rumble(int32_t) { return 0; }
 extern "C" void goldenpad_recomp_set_textured_sky(int32_t) {}
 extern "C" void goldenpad_recomp_set_controller_connected(int32_t) {}
+extern "C" void goldenpad_recomp_set_remote_ports(int32_t) {}
 extern "C" void goldenpad_recomp_set_two_player_test_mode(int32_t) {}
 extern "C" void goldenpad_recomp_set_four_player_test_mode(int32_t) {}
 extern "C" void goldenpad_recomp_set_fire_rate_probe_enabled(int32_t) {}

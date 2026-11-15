@@ -85,6 +85,8 @@ std::atomic<bool> controllerConnected = false;
 std::atomic<int32_t> touchInputPort = -1;
 std::atomic<bool> twoPlayerTestMode = false;
 std::atomic<bool> fourPlayerTestMode = false;
+// Bit n set while an iPhone controller (Apple TV) owns player n+1.
+std::atomic<uint32_t> remotePortsMask = 0;
 std::atomic<uint64_t> rt64DisplayListCount = 0;
 std::atomic<uint64_t> rt64ScreenUpdateCount = 0;
 std::atomic<uint64_t> rt64PresentedCount = 0;
@@ -1502,7 +1504,8 @@ bool getInput(int controllerNum, uint16_t *buttons, float *x, float *y) {
             determinismProbeEnabled.load(std::memory_order_relaxed) ||
             controllerNum == 0 ||
             (controllerNum == 1 && twoPlayerTestMode.load(std::memory_order_relaxed)) ||
-            (controllerNum >= 2 && fourPlayerTestMode.load(std::memory_order_relaxed)));
+            (controllerNum >= 2 && fourPlayerTestMode.load(std::memory_order_relaxed)) ||
+            ((remotePortsMask.load(std::memory_order_relaxed) >> controllerNum) & 1) != 0);
     if (!portAvailable || buttons == nullptr || x == nullptr || y == nullptr) {
         const uint8_t reportBit = controllerNum >= 0 && controllerNum < 4
             ? static_cast<uint8_t>(1u << controllerNum)
@@ -1563,7 +1566,8 @@ ultramodern::input::connected_device_info_t getConnectedDeviceInfo(int controlle
             determinismProbeEnabled.load(std::memory_order_relaxed) ||
             controllerNum == 0 ||
             (controllerNum == 1 && twoPlayerTestMode.load(std::memory_order_relaxed)) ||
-            (controllerNum >= 2 && fourPlayerTestMode.load(std::memory_order_relaxed)));
+            (controllerNum >= 2 && fourPlayerTestMode.load(std::memory_order_relaxed)) ||
+            ((remotePortsMask.load(std::memory_order_relaxed) >> controllerNum) & 1) != 0);
     if (portAvailable) {
         const uint8_t reportBit = static_cast<uint8_t>(1u << controllerNum);
         if ((controllerPortsReported.fetch_or(reportBit) & reportBit) == 0) {
@@ -1573,7 +1577,9 @@ ultramodern::input::connected_device_info_t getConnectedDeviceInfo(int controlle
         // GoldenEye's own osMotorInit succeeds and its rumble reaches
         // setRumble (the host mirrors it on controller haptics). Netplay and
         // determinism probes keep the original empty slot.
-        const bool rumblePak = controllerNum == 0 &&
+        // Phones held by an Apple TV get one too, so each phone can buzz.
+        const bool rumblePak = (controllerNum == 0 ||
+            ((remotePortsMask.load(std::memory_order_relaxed) >> controllerNum) & 1) != 0) &&
             !netplayEnabled.load(std::memory_order_relaxed) &&
             !determinismProbeEnabled.load(std::memory_order_relaxed);
         return {ultramodern::input::Device::Controller,
@@ -1790,6 +1796,20 @@ extern "C" int32_t goldenpad_recomp_get_rumble(int32_t controllerNum) {
         return 0;
     }
     return controllerRumbleOn[static_cast<size_t>(controllerNum)].load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+// Apple TV: which players are held by phones acting as controllers. Those
+// ports are advertised as plugged-in controllers so GoldenEye's own
+// multiplayer menus see up to four players.
+extern "C" void goldenpad_recomp_set_remote_ports(int32_t mask) {
+    const uint32_t next = static_cast<uint32_t>(mask) & 0xF;
+    const uint32_t previous = remotePortsMask.exchange(next, std::memory_order_relaxed);
+    if (previous != next) {
+        controllerPortsReported.store(0, std::memory_order_relaxed);
+        inputStateReported.store(0, std::memory_order_relaxed);
+        invalidInputPortsReported.store(0, std::memory_order_relaxed);
+        logEvent("input", "phone controllers now hold ports mask 0x%x", next);
+    }
 }
 
 extern "C" void goldenpad_recomp_set_controller_connected(int32_t connected) {

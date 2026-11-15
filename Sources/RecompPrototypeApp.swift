@@ -143,7 +143,13 @@ struct GoldenPadApp: App {
                     ZStack(alignment: .topTrailing) {
                 Color.black
                     .ignoresSafeArea()
-                gameSurfaceView
+                if ProcessInfo.processInfo.arguments.contains("--no-game") {
+                    // CI: the Apple TV simulator's Metal cannot run RT64 (31
+                    // buffer limit), so the controller test runs without it.
+                    Color.black.ignoresSafeArea()
+                } else {
+                    gameSurfaceView
+                }
                 // The CAMetalLayer can leave a two-physical-pixel sampling
                 // seam at the display's far edge. One opaque point masks that
                 // host seam without changing RT64's drawable or viewport.

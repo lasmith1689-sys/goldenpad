@@ -1,9 +1,10 @@
 #!/bin/bash
-# Apple TV simulator launch test: installs the personal Apple TV app (my ROM
-# inside, never uploaded), checks the game starts and draws changing
-# frames, then plays it with a scripted "iPhone" over Bonjour and checks the
-# TV seated it as a player. Prints numbers only: no screenshots leave the
-# runner, since they would show the game.
+# Apple TV simulator test of "use your iPhone as a controller": installs the
+# personal Apple TV app and launches it with --no-game (the simulator's Metal
+# allows 31 buffers and RT64 needs 52, so the game itself cannot draw
+# there), then a scripted "iPhone" finds it over Bonjour, joins and presses
+# Start, and the TV app's own log must show it seated the phone as Player 1
+# and received the presses. No screenshots leave the runner.
 #
 # Usage: tvos-sim-test.sh GoldenPad.app
 set -euo pipefail
@@ -26,7 +27,7 @@ echo "Simulator $dev"
 xcrun simctl boot "$dev" 2>/dev/null || true
 xcrun simctl bootstatus "$dev" -b > /dev/null
 xcrun simctl install "$dev" "$app"
-xcrun simctl launch --console-pty "$dev" "$bundle" > "$out/console.log" 2>&1 &
+xcrun simctl launch --console-pty "$dev" "$bundle" --no-game > "$out/console.log" 2>&1 &
 launcher=$!
 
 # A tiny PNG reader (no Pillow on the runner): fraction of non-black pixels
@@ -72,9 +73,10 @@ for path in sys.argv[1:]:
 PY
 shot() { xcrun simctl io "$dev" screenshot --type=png "$out/$1.png" > /dev/null 2>&1 || echo "(screenshot $1 failed)"; }
 
-echo "== Waiting for the game to boot"
-sleep 30
-shot boot-1; sleep 4; shot boot-2
+echo "== Waiting for the app to start"
+sleep 15
+grep -m1 "remote: listening" "$out/console.log" || failures+=("the TV app never started listening for iPhones")
+shot boot-1
 
 echo "== Scripted iPhone joins the Apple TV"
 xcrun swiftc -O Sources/RemoteControllerProtocol.swift Sources/RemoteControllerTransport.swift \
@@ -89,28 +91,17 @@ else
   echo "no"; failures+=("the app is not running after the test (crashed?)")
 fi
 
-echo "== Frames"
-python3 "$out/png_stats.py" "$out"/*.png | tee "$out/frames.txt" || failures+=("could not read screenshots")
-lit_max=$(awk '{for(i=1;i<=NF;i++) if ($i ~ /^lit=/) {sub("lit=","",$i); if ($i>m) m=$i}} END{print m+0}' "$out/frames.txt")
-hashes=$(awk '{for(i=1;i<=NF;i++) if ($i ~ /^hash=/) print $i}' "$out/frames.txt" | sort -u | wc -l | tr -d ' ')
-echo "brightest frame: $lit_max of pixels lit; distinct frames: $hashes"
-awk -v m="$lit_max" 'BEGIN{exit !(m >= 0.05)}' || failures+=("the screen stayed black")
-[ "$hashes" -ge 2 ] || failures+=("the picture never changed")
+echo "== Screen (numbers only)"
+python3 "$out/png_stats.py" "$out"/*.png || true
 
-echo "== Game log"
-container=$(xcrun simctl get_app_container "$dev" "$bundle" data 2>/dev/null || true)
-log="$container/Library/Caches/GoldenPadRecomp/goldenpad-recomp-latest.log"
-if [ -f "$log" ]; then
-  wc -l < "$log"
-  grep -iE "phone controllers|external controller|AOT runtime error|error|renderer|rt64|first frame|presented" "$log" | head -40 || true
-  grep -q "phone controllers now hold ports mask 0x1" "$log" || failures+=("the game never registered the phone as Player 1")
-else
-  echo "(no game log at $log)"
-  ls -R "$container/Library" 2>/dev/null | head -30 || true
-  failures+=("no game log")
-fi
-echo "--- console (last 40 lines) ---"
-tail -n 40 "$out/console.log" || true
+echo "== What the TV app logged"
+grep "remote:" "$out/console.log" | sed 's/^.*\[GoldenPad\] //' | head -30 || true
+grep -q "remote: iPhone joined as Player 1" "$out/console.log" || failures+=("the TV app never seated the phone as Player 1")
+grep -q "remote: player 1 buttons 0x1000" "$out/console.log" || failures+=("the TV app never received the phone's Start press")
+grep -q "remote: player 1 buttons 0x0000" "$out/console.log" || failures+=("the TV app never saw Start released")
+grep -q "Player 1's iPhone left" "$out/console.log" || failures+=("the TV app did not notice the phone leaving")
+echo "--- console (last 25 lines) ---"
+tail -n 25 "$out/console.log" || true
 
 kill "$launcher" 2>/dev/null || true
 xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true
@@ -120,4 +111,4 @@ if [ "${#failures[@]}" -gt 0 ]; then
   for f in "${failures[@]}"; do echo "::error::$f"; done
   exit 1
 fi
-echo "PASS: the Apple TV app boots, draws changing frames, and took a scripted iPhone as Player 1"
+echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player 1, received its Start presses and saw it leave"

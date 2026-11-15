@@ -42,6 +42,7 @@ final class RemoteControllerHost: ObservableObject {
 
     private let core = RemoteControllerHostCore()
     private var started = false
+    private var loggedButtons: [Int: UInt16] = [:]
     private var noticeTask: Task<Void, Never>?
 
     func start() {
@@ -79,6 +80,9 @@ final class RemoteControllerHost: ObservableObject {
         core.server.onFailed = { [weak self] message in
             Task { @MainActor in self?.problem = "iPhones can't connect: \(message)" }
         }
+        core.server.onReady = { port in
+            NSLog("[GoldenPad] remote: listening for iPhones on port %d", Int(port))
+        }
         do {
             try core.server.start()
         } catch {
@@ -94,6 +98,11 @@ final class RemoteControllerHost: ObservableObject {
             (mixer.setReservedPort(reservedPort), mixer.drain(now: now), mixer.slots.owners)
         }
         if !moved.isEmpty { refreshPlayers() }
+        for frame in frames where loggedButtons[frame.port] != frame.buttons {
+            // (a few lines per press; the CI simulator test reads these)
+            loggedButtons[frame.port] = frame.buttons
+            NSLog("[GoldenPad] remote: player %d buttons 0x%04x", frame.port + 1, frame.buttons)
+        }
         guard started, !owners.isEmpty || !moved.isEmpty else { return frames }
         let statuses = owners.map { port, id in
             (id, RemoteControllerStatus(player: port, rumble: rumble(port)))
@@ -116,6 +125,7 @@ final class RemoteControllerHost: ObservableObject {
     }
 
     private func show(_ message: String) {
+        NSLog("[GoldenPad] remote: %@", message)
         notice = message
         noticeTask?.cancel()
         noticeTask = Task { @MainActor [weak self] in

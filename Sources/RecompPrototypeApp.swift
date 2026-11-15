@@ -1107,7 +1107,18 @@ private struct GoldenPadSlider: View {
 
     var body: some View {
         #if os(tvOS)
-        Stepper(String(format: "%.2f×", value), value: $value, in: range, step: step)
+        // tvOS has no Slider or Stepper: focusable − and + buttons.
+        HStack(spacing: 24) {
+            Button { value = max(range.lowerBound, value - step) } label: {
+                Image(systemName: "minus")
+            }
+            Text(String(format: "%.2f×", value))
+                .monospacedDigit()
+                .frame(minWidth: 120)
+            Button { value = min(range.upperBound, value + step) } label: {
+                Image(systemName: "plus")
+            }
+        }
         #else
         Slider(value: $value, in: range, step: step)
         #endif

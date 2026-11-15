@@ -1,0 +1,30 @@
+name: Checks
+
+# Fast, game-free checks on every push: tests that need no ROM and no signing.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  remote-controller:
+    name: Phone as controller (format, players, loopback)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Message format, player slots and input mixing
+        run: |
+          swiftc --version
+          swiftc -O Sources/RemoteControllerProtocol.swift Tests/RemoteControllerProtocolTests.swift \
+            -parse-as-library -o "$RUNNER_TEMP/remote-controller-tests"
+          "$RUNNER_TEMP/remote-controller-tests"
+      - name: Phone-to-TV loopback over real sockets
+        run: |
+          swiftc -O Sources/RemoteControllerProtocol.swift Sources/RemoteControllerTransport.swift \
+            Tests/RemoteControllerLoopbackTest.swift -parse-as-library -o "$RUNNER_TEMP/remote-controller-loopback"
+          "$RUNNER_TEMP/remote-controller-loopback"

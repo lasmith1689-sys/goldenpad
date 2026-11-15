@@ -8,7 +8,7 @@
 set -euo pipefail
 
 usage() {
-  echo 'Usage: build-personal-ipa.sh --rom YOUR_ROM --output PERSONAL.ipa [--work DIR] [--platform ios|tvos]' >&2
+  echo 'Usage: build-personal-ipa.sh --rom YOUR_ROM --output PERSONAL.ipa [--work DIR] [--platform ios|tvos|tvos-sim]' >&2
   exit 2
 }
 
@@ -27,7 +27,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$rom" ] && [ -n "$output" ] || usage
-case "$platform" in ios|tvos) ;; *) usage ;; esac
+case "$platform" in ios|tvos|tvos-sim) ;; *) usage ;; esac
 [ -f "$rom" ] || { echo "ROM not found: $rom" >&2; exit 1; }
 command -v xdelta3 >/dev/null || { echo 'xdelta3 is required (brew install xdelta)' >&2; exit 1; }
 . "$repo_root/scripts/mips-llvm.sh"
@@ -72,6 +72,26 @@ if [ ! -f "$generated/.personal-build-complete" ]; then
   fi
   "$repo_root/scripts/generate-recomp-inputs.sh" "$tlbfree" "$generated"
   touch "$generated/.personal-build-complete"
+fi
+
+if [ "$platform" = tvos-sim ]; then
+  # CI launch test only: the app for the Apple TV simulator, with my ROM
+  # inside. --output is the .app path. Never published.
+  echo '== Apple TV simulator runtime and RT64 archives'
+  "$repo_root/scripts/build-recomp-runtime.sh" appletvsimulator
+  GOLDENPAD_RT64_PLATFORM=tvos GOLDENPAD_RT64_ARTIFACT_DIR="$repo_root/build-rt64-tvos" \
+    "$repo_root/scripts/verify-rt64-ios-static.sh"
+  echo '== Apple TV simulator app'
+  "$repo_root/scripts/build-recomp-apple.sh" tvos-sim "$generated"
+  app="$repo_root/build-maintained-tvos-sim/Release-appletvsimulator/GoldenPadRecompPrototype.app"
+  [ -d "$app" ] || { echo "The build did not produce $app" >&2; exit 1; }
+  rm -rf "$output"
+  mkdir -p "$(dirname "$output")"
+  ditto --noqtn "$app" "$output"
+  cp "$work/GoldenEye_retail.z64" "$output/GoldenEye_retail.z64"
+  codesign --force --sign - "$output"
+  echo "Apple TV simulator app (do not publish): $output"
+  exit 0
 fi
 
 if [ "$platform" = tvos ]; then

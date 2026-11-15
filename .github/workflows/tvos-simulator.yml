@@ -1,0 +1,74 @@
+name: Apple TV simulator test
+
+# Builds the Apple TV app for the simulator with my ROM inside, launches it,
+# checks the game boots and draws, and plays it with a scripted iPhone over
+# Bonjour. Only pass/fail numbers are printed; no screenshots are uploaded.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: tvos-simulator
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    name: Launch on the Apple TV simulator and play with a scripted iPhone
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Pick the newest Xcode 26 and free disk space
+        run: |
+          # (several Xcode_*.app names are symlinks to one install: compare real paths)
+          ls -la /Applications | grep -i xcode || true
+          xcode=$(for x in /Applications/Xcode_26*.app; do [ -L "$x" ] || echo "$x"; done | sort -V | tail -n 1)
+          xcode=$(cd "$xcode" && pwd -P)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          echo "Using $xcode"
+          # (GoldenPad needs about 20 GB; drop what this job never uses)
+          for other in /Applications/Xcode*.app; do
+            [ -L "$other" ] && continue
+            [ "$(cd "$other" && pwd -P)" = "$xcode" ] || sudo rm -rf "$other" &
+          done
+          sudo rm -rf "${ANDROID_HOME:-/nonexistent}" "$HOME/.dotnet" /usr/local/share/dotnet &
+          wait
+          df -h /
+      - name: Install build tools
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          brew install cmake ninja xdelta sdl2 llvm lld
+          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/opt/lld/bin" >> "$GITHUB_PATH"
+          xcodebuild -downloadComponent MetalToolchain
+      - name: Decrypt my ROM inside the runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROM_KEY: ${{ secrets.ROM_KEY }}
+        run: |
+          [ -n "$ROM_KEY" ] || { echo "::error::Add the ROM_KEY secret first."; exit 1; }
+          mkdir -p "$RUNNER_TEMP/rom"
+          gh release download rom-input -R "$GITHUB_REPOSITORY" -p rom.z64.enc -D "$RUNNER_TEMP/rom"
+          /opt/homebrew/opt/openssl@3/bin/openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 \
+            -pass env:ROM_KEY -in "$RUNNER_TEMP/rom/rom.z64.enc" -out "$RUNNER_TEMP/rom/GoldenEye.z64"
+          rm -f "$RUNNER_TEMP/rom/rom.z64.enc"
+      - name: Build the Apple TV simulator app
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: '3'
+        run: |
+          bash scripts/build-personal-ipa.sh --rom "$RUNNER_TEMP/rom/GoldenEye.z64" --work build-personal             --platform tvos-sim --output "$RUNNER_TEMP/sim/GoldenPad.app"
+      - name: Launch, check frames, play with a scripted iPhone
+        run: bash .github/scripts/tvos-sim-test.sh "$RUNNER_TEMP/sim/GoldenPad.app"
+      - name: Remove the ROM and everything built from it
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/rom" "$RUNNER_TEMP/sim" "$RUNNER_TEMP/tvos-sim" build-personal build-maintained-tvos-sim
+          xcrun simctl shutdown all 2>/dev/null || true
+          xcrun simctl erase all 2>/dev/null || true

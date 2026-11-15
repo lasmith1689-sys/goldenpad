@@ -28,6 +28,8 @@ jobs:
           swiftc -O Sources/RemoteControllerProtocol.swift Sources/RemoteControllerTransport.swift \
             Tests/RemoteControllerLoopbackTest.swift -parse-as-library -o "$RUNNER_TEMP/remote-controller-loopback"
           "$RUNNER_TEMP/remote-controller-loopback"
+          # (the scripted iPhone used by the Apple TV simulator test must build too)
+          swiftc -O Sources/RemoteControllerProtocol.swift Sources/RemoteControllerTransport.swift             Tests/RemoteControllerPhoneScript.swift -parse-as-library -o "$RUNNER_TEMP/remote-controller-phone"
 
   apple-compile:
     name: App Swift compiles for iPhone and Apple TV; Apple TV icons compile

@@ -14,7 +14,14 @@ expected_shader_targets=113
 expected_metal_shaders=56
 expected_rt64_members=210
 expected_closure_members=246
-expected_metal_target=apple-ios17.0.0
+# GOLDENPAD_RT64_PLATFORM=tvos builds the Apple TV archives instead.
+rt64_platform=${GOLDENPAD_RT64_PLATFORM:-ios}
+case "$rt64_platform" in
+    ios) rt64_system=iOS; rt64_os=ios; rt64_sdks="iphoneos iphonesimulator";;
+    tvos) rt64_system=tvOS; rt64_os=tvos; rt64_sdks="appletvos appletvsimulator";;
+    *) echo "GOLDENPAD_RT64_PLATFORM must be ios or tvos" >&2; exit 2;;
+esac
+expected_metal_target=apple-${rt64_os}17.0.0
 artifact_root=${GOLDENPAD_RT64_ARTIFACT_DIR:-}
 metal_toolchain=${GOLDENPAD_METAL_TOOLCHAIN:-}
 run_xcrun() {
@@ -33,6 +40,39 @@ if [ "${GOLDENPAD_RT64_SIMULATOR_RESOURCE_LIMITS:-OFF}" = ON ]; then
     cp -R "$rt64_path" "$probe_root/rt64-diagnostic"
     rt64_path="$probe_root/rt64-diagnostic"
     patch -p1 --batch -d "$rt64_path" < "$repo_root/patches/rt64-ios-simulator-resource-limits.patch"
+fi
+
+# Apple TV: stage a disposable copy taught that tvOS is an embedded Apple
+# platform like iOS (pinned source stays untouched). Plume's iOS capability
+# block keys on TARGET_OS_IOS, which is false on tvOS; everything else in
+# RT64/Plume already uses TARGET_OS_IPHONE, which is true on tvOS.
+if [ "$rt64_platform" = tvos ]; then
+    rsync -a --exclude .git "$rt64_path/" "$probe_root/rt64-tvos/"
+    rt64_path="$probe_root/rt64-tvos"
+    python3 - "$rt64_path" <<'PYTVOS'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+cmake = root / "CMakeLists.txt"
+text = cmake.read_text()
+text = text.replace('CMAKE_SYSTEM_NAME STREQUAL "iOS"', 'CMAKE_SYSTEM_NAME MATCHES "^(iOS|tvOS)$"')
+for variant in ("iphonesimulator", "iphoneos"):
+    tv = "appletvsimulator" if variant == "iphonesimulator" else "appletvos"
+    old = 'set(RT64_METAL_SDK "%s")' % variant
+    new = ('if (CMAKE_SYSTEM_NAME STREQUAL "tvOS")\n'
+           '            set(RT64_METAL_SDK "%s")\n'
+           '        else()\n'
+           '            set(RT64_METAL_SDK "%s")\n'
+           '        endif()') % (tv, variant)
+    assert text.count(old) == 1, old
+    text = text.replace(old, new)
+cmake.write_text(text)
+header = root / "src/contrib/plume/plume_metal.h"
+htext = header.read_text()
+old = "(TARGET_OS_IOS && !TARGET_OS_MACCATALYST)"
+assert htext.count(old) == 1
+header.write_text(htext.replace(old, "((TARGET_OS_IOS || TARGET_OS_TV) && !TARGET_OS_MACCATALYST)"))
+print("Staged tvOS RT64 copy:", root)
+PYTVOS
 fi
 
 host_build="$probe_root/host"
@@ -71,14 +111,14 @@ if [ ! -x "$file_to_c" ]; then
     exit 1
 fi
 
-for sdk in iphoneos iphonesimulator; do
-    if [ "$sdk" = iphoneos ]; then
-        target=arm64-apple-ios17.0
-        metal_target=air64-apple-ios17.0
+for sdk in $rt64_sdks; do
+    if [ "$sdk" = iphoneos ] || [ "$sdk" = appletvos ]; then
+        target=arm64-apple-${rt64_os}17.0
+        metal_target=air64-apple-${rt64_os}17.0
         expected_sdk_metal_target="$expected_metal_target"
     else
-        target=arm64-apple-ios17.0-simulator
-        metal_target=air64-apple-ios17.0-simulator
+        target=arm64-apple-${rt64_os}17.0-simulator
+        metal_target=air64-apple-${rt64_os}17.0-simulator
         expected_sdk_metal_target="$expected_metal_target-simulator"
     fi
 
@@ -106,7 +146,7 @@ for sdk in iphoneos iphonesimulator; do
             -target "$metal_target" \
             -c "$source" -o "$output_base.air"
         run_xcrun -sdk "$sdk" metallib "$output_base.air" -o "$output_base.metallib"
-        metal_targets=$(strings "$output_base.metallib" | sed -E -n 's/.*(air64_v[[:alnum:]_.-]*apple-ios[0-9.]+(-simulator)?).*/\1/p' | LC_ALL=C sort -u)
+        metal_targets=$(strings "$output_base.metallib" | sed -E -n 's/.*(air64_v[[:alnum:]_.-]*apple-(ios|tvos)[0-9.]+(-simulator)?).*/\1/p' | LC_ALL=C sort -u)
         if ! printf '%s\n' "$metal_targets" | grep -Eq "^air64_v[[:alnum:]_.-]*${expected_sdk_metal_target}$"; then
             echo "$sdk Metal library has the wrong deployment target: $output_base.metallib" >&2
             printf '%s\n' "$metal_targets" >&2
@@ -131,7 +171,7 @@ for sdk in iphoneos iphonesimulator; do
     fi
 
     cmake -S "$rt64_path" -B "$build" -G Ninja \
-        -DCMAKE_SYSTEM_NAME=iOS \
+        -DCMAKE_SYSTEM_NAME="$rt64_system" \
         -DCMAKE_OSX_SYSROOT="$sdk" \
         -DCMAKE_OSX_ARCHITECTURES=arm64 \
         -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \

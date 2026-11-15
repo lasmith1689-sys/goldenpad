@@ -271,6 +271,7 @@ final class RecompTouchLayoutStore: ObservableObject {
     }
 }
 
+#if !os(tvOS)
 struct RecompPrototypeLiveTouchLayoutEditor: View {
     @ObservedObject var store: RecompTouchLayoutStore
     let deviceClass: RecompTouchDeviceClass
@@ -494,3 +495,4 @@ struct RecompPrototypeLiveTouchLayoutEditor: View {
         selectedID = enabled ? .secondaryFire : placements.first(where: { $0.isEnabled })?.id
     }
 }
+#endif

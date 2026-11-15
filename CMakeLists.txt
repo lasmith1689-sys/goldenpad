@@ -39,13 +39,29 @@ set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/BuildIdentity.txt" PROP
 
 option(GOLDENPAD_RECOMP_MAC "Build the native Apple-Silicon GoldenPad Mac app" OFF)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
     set(goldenpad_apple_platform "mobile")
 elseif(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND GOLDENPAD_RECOMP_MAC)
     set(goldenpad_apple_platform "mac")
 else()
     message(FATAL_ERROR
-        "GoldenPad supports iOS/iPadOS, or native macOS with -DGOLDENPAD_RECOMP_MAC=ON. See docs/BUILDING.md.")
+        "GoldenPad supports iOS/iPadOS, tvOS, or native macOS with -DGOLDENPAD_RECOMP_MAC=ON. See docs/BUILDING.md.")
+endif()
+
+# Apple TV builds the same recomp app with tvOS packaging: layered TV icon
+# and Top Shelf art, a TV Info.plist, and the Apple TV device family.
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    set(goldenpad_mobile_assets AssetsTV.xcassets)
+    set(goldenpad_mobile_app_icon "App Icon & Top Shelf Image")
+    set(goldenpad_mobile_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/Config/RecompPrototypeInfoTV.plist.in")
+    set(goldenpad_mobile_platforms "appletvos appletvsimulator")
+    set(goldenpad_mobile_device_family "3")
+else()
+    set(goldenpad_mobile_assets Assets.xcassets)
+    set(goldenpad_mobile_app_icon "AppIcon")
+    set(goldenpad_mobile_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/Config/RecompPrototypeInfo.plist.in")
+    set(goldenpad_mobile_platforms "iphoneos iphonesimulator")
+    set(goldenpad_mobile_device_family "1,2")
 endif()
 
 if(goldenpad_apple_platform STREQUAL "mac")
@@ -539,7 +555,7 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
         Sources/GoldenPadDiagnostics.swift
         Sources/GoldenPadIssueReport.swift
         "${CMAKE_CURRENT_BINARY_DIR}/BuildIdentity.txt"
-        Assets.xcassets
+        ${goldenpad_mobile_assets}
         Config/ThirdPartyNotices.txt
         Sources/RecompPrototypeApp.swift
         Sources/RecompPrototypeAudio.swift
@@ -561,28 +577,29 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
         MACOSX_BUNDLE_GUI_IDENTIFIER "${GOLDENPAD_RECOMP_BUNDLE_IDENTIFIER}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${GOLDENPAD_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${GOLDENPAD_RECOMP_BUILD_VERSION}"
-        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Config/RecompPrototypeInfo.plist.in"
+        MACOSX_BUNDLE_INFO_PLIST "${goldenpad_mobile_info_plist}"
         XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "${goldenpad_recomp_code_signing_allowed}"
         XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "${goldenpad_recomp_code_signing_required}"
         XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
         XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${GOLDENPAD_DEVELOPMENT_TEAM}"
-        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "${goldenpad_mobile_app_icon}"
         XCODE_ATTRIBUTE_GENERATE_INFOPLIST_FILE "NO"
         XCODE_ATTRIBUTE_GOLDENPAD_RECOMP_DISPLAY_NAME "${GOLDENPAD_RECOMP_DISPLAY_NAME}"
         XCODE_ATTRIBUTE_GOLDENPAD_RECOMP_BUILD_VERSION "${GOLDENPAD_RECOMP_BUILD_VERSION}"
         XCODE_ATTRIBUTE_GOLDENPAD_VERSION "${GOLDENPAD_VERSION}"
         XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "17.0"
+        XCODE_ATTRIBUTE_TVOS_DEPLOYMENT_TARGET "17.0"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${GOLDENPAD_RECOMP_BUNDLE_IDENTIFIER}"
-        XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
+        XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "${goldenpad_mobile_platforms}"
         XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
-        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "${goldenpad_mobile_device_family}"
         XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
         XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++20"
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED TRUE
     )
     set_source_files_properties(
-        Assets.xcassets
+        ${goldenpad_mobile_assets}
         Config/ThirdPartyNotices.txt
         ${goldenpad_recomp_resources}
         PROPERTIES MACOSX_PACKAGE_LOCATION Resources)

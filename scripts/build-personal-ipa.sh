@@ -8,7 +8,7 @@
 set -euo pipefail
 
 usage() {
-  echo 'Usage: build-personal-ipa.sh --rom YOUR_ROM --output PERSONAL.ipa [--work DIR]' >&2
+  echo 'Usage: build-personal-ipa.sh --rom YOUR_ROM --output PERSONAL.ipa [--work DIR] [--platform ios|tvos]' >&2
   exit 2
 }
 
@@ -16,15 +16,18 @@ repo_root=$(cd "$(dirname "$0")/.." && pwd)
 rom=
 output=
 work="$repo_root/build-personal"
+platform=ios
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --rom) [ "$#" -ge 2 ] || usage; rom=$2; shift 2 ;;
     --output) [ "$#" -ge 2 ] || usage; output=$2; shift 2 ;;
     --work) [ "$#" -ge 2 ] || usage; work=$2; shift 2 ;;
+    --platform) [ "$#" -ge 2 ] || usage; platform=$2; shift 2 ;;
     *) usage ;;
   esac
 done
 [ -n "$rom" ] && [ -n "$output" ] || usage
+case "$platform" in ios|tvos) ;; *) usage ;; esac
 [ -f "$rom" ] || { echo "ROM not found: $rom" >&2; exit 1; }
 command -v xdelta3 >/dev/null || { echo 'xdelta3 is required (brew install xdelta)' >&2; exit 1; }
 . "$repo_root/scripts/mips-llvm.sh"
@@ -69,6 +72,32 @@ if [ ! -f "$generated/.personal-build-complete" ]; then
   fi
   "$repo_root/scripts/generate-recomp-inputs.sh" "$tlbfree" "$generated"
   touch "$generated/.personal-build-complete"
+fi
+
+if [ "$platform" = tvos ]; then
+  echo '== Apple TV runtime and RT64 archives'
+  "$repo_root/scripts/build-recomp-runtime.sh" appletvos
+  GOLDENPAD_RT64_PLATFORM=tvos GOLDENPAD_RT64_ARTIFACT_DIR="$repo_root/build-rt64-tvos" \
+    "$repo_root/scripts/verify-rt64-ios-static.sh"
+
+  echo '== Apple TV app'
+  "$repo_root/scripts/build-recomp-apple.sh" tvos "$generated"
+  app="$repo_root/build-maintained-tvos/Release-appletvos/GoldenPadRecompPrototype.app"
+  [ -d "$app" ] || { echo "The build did not produce $app" >&2; exit 1; }
+
+  # The iOS package checks audit iPhone resources; the Apple TV package is the
+  # same app bundle zipped as an IPA (signed later at export).
+  echo '== Package (Apple TV)'
+  staging=$(mktemp -d "${TMPDIR:-/tmp}/goldenpad-tvos-ipa.XXXXXX")
+  mkdir -p "$staging/Payload"
+  ditto --noqtn "$app" "$staging/Payload/GoldenPad.app"
+  codesign --remove-signature "$staging/Payload/GoldenPad.app" >/dev/null 2>&1 || true
+  mkdir -p "$(dirname "$output")"
+  rm -f "$output"
+  (cd "$staging" && zip -qry "$output" Payload)
+  rm -rf "$staging"
+  echo "Personal Apple TV IPA (do not publish): $output"
+  exit 0
 fi
 
 echo '== Runtime and RT64 archives'

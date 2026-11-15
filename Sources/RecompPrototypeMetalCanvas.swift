@@ -91,8 +91,7 @@ final class RecompPrototypeSurface: ObservableObject {
             return
         }
         #if GOLDENPAD_RECOMP_AOT_LINKED
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("GoldenPadRecomp", isDirectory: true)
+        let support = GoldenPadStorage.supportDirectory
         GoldenPadDiagnostics.start(at: support)
         #endif
         let window = Unmanaged.passUnretained(view).toOpaque()
@@ -109,11 +108,9 @@ final class RecompPrototypeSurface: ObservableObject {
     private func requestStagedGameLaunch(window: UnsafeMutableRawPointer, layer: UnsafeMutableRawPointer) {
         #if GOLDENPAD_RECOMP_AOT_LINKED
         guard !gameLaunchRequested else { return }
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let romURL = documents.appendingPathComponent("GoldenEye_TLBFREE.z64")
+        let romURL = GoldenPadStorage.romDirectory.appendingPathComponent("GoldenEye_TLBFREE.z64")
         guard FileManager.default.fileExists(atPath: romURL.path) else { return }
-        let configURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("GoldenPadRecomp", isDirectory: true)
+        let configURL = GoldenPadStorage.supportDirectory
         do {
             try FileManager.default.createDirectory(at: configURL, withIntermediateDirectories: true)
         } catch {
@@ -173,6 +170,29 @@ final class RecompPrototypeSurface: ObservableObject {
         encoder.endEncoding()
         buffer.present(drawable)
         buffer.commit()
+    }
+}
+
+/// Where GoldenPad keeps its converted ROM and runtime/save files.
+/// Apple TV apps cannot rely on persistent Documents or Application Support
+/// storage, so tvOS uses Caches; the bundled ROM is re-imported if the
+/// system purges it.
+enum GoldenPadStorage {
+    static var romDirectory: URL {
+        #if os(tvOS)
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        #else
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        #endif
+    }
+
+    static var supportDirectory: URL {
+        #if os(tvOS)
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        #else
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #endif
+        return base.appendingPathComponent("GoldenPadRecomp", isDirectory: true)
     }
 }
 

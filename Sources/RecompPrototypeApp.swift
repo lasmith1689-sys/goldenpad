@@ -152,6 +152,7 @@ struct GoldenPadApp: App {
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
+                #if !os(tvOS)
                 if isEditingTouchLayout {
                     RecompPrototypeLiveTouchLayoutEditor(
                         store: touchLayout,
@@ -168,6 +169,7 @@ struct GoldenPadApp: App {
                     )
                         .ignoresSafeArea()
                 }
+                #endif
                 GeometryReader { geometry in
                     ZStack(alignment: .topLeading) {
                         if isUtilityMenuPresented {
@@ -343,14 +345,14 @@ struct GoldenPadApp: App {
                         activeControlStyle: input.activeControlStyle
                     )
                 case let .share(url):
+                    #if os(tvOS)
+                    Text(url.lastPathComponent)
+                    #else
                     RecompPrototypeShareSheet(items: [url])
+                    #endif
                 }
             }
-            .fileImporter(
-                isPresented: $romStore.isImporterPresented,
-                allowedContentTypes: [.data],
-                allowsMultipleSelection: false
-            ) { result in
+            .goldenPadROMImporter(isPresented: $romStore.isImporterPresented) { result in
                 romStore.handleSelection(result.flatMap { urls in
                     guard let url = urls.first else {
                         return .failure(CocoaError(.fileNoSuchFile))
@@ -360,6 +362,9 @@ struct GoldenPadApp: App {
             }
             .onOpenURL { url in
                 romStore.handleOpenURL(url)
+            }
+            .goldenPadMenuCommand {
+                if romStore.isReady { isUtilityMenuPresented.toggle() }
             }
         }
     }
@@ -756,6 +761,7 @@ private struct RecompPrototypeSettingsView: View {
                     LabeledContent("Presentation", value: "Original rate (stable)")
                     LabeledContent("Renderer", value: "RT64 Metal")
                 }
+                #if !os(tvOS)
                 Section("Touch Controls") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -764,7 +770,7 @@ private struct RecompPrototypeSettingsView: View {
                             Text(String(format: "%.2f×", lookSensitivity))
                                 .foregroundStyle(.secondary)
                         }
-                        Slider(value: $lookSensitivity, in: 0.5...8.0, step: 0.25)
+                        GoldenPadSlider(value: $lookSensitivity, range: 0.5...8.0, step: 0.25)
                     }
                     Text("GoldenPad keeps the tuned 1.5× swipe accumulation and 4.0× default sensitivity from the original touch build.")
                         .font(.footnote)
@@ -793,6 +799,7 @@ private struct RecompPrototypeSettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                #endif
                 Section("GoldenEye Controls") {
                     LabeledContent("Active in-game style", value: controlStyleTitle(activeControlStyle))
                     Text("GoldenPad follows GoldenEye's active 1.1-1.4 control style automatically. The game's own control style and aim options remain in the watch menu.")
@@ -812,7 +819,7 @@ private struct RecompPrototypeSettingsView: View {
                             Text(String(format: "%.2f×", controllerLookSpeed))
                                 .foregroundStyle(.secondary)
                         }
-                        Slider(value: $controllerLookSpeed, in: 0.5...2.0, step: 0.05)
+                        GoldenPadSlider(value: $controllerLookSpeed, range: 0.5...2.0, step: 0.05)
                     }
                     Toggle("Turn boost at full tilt", isOn: $controllerTurnBoost)
                     Toggle("Rumble", isOn: $controllerRumble)
@@ -934,6 +941,7 @@ private struct RecompPrototypeControllerMappingView: View {
     }
 }
 
+#if !os(tvOS)
 private struct RecompPrototypeShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -943,6 +951,7 @@ private struct RecompPrototypeShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
+#endif
 
 private enum RecompPrototypeDiagnostics {
 
@@ -1040,5 +1049,52 @@ private struct RecompPrototypeReticle: View {
                 .frame(width: 2, height: 2)
         }
         .shadow(color: .black.opacity(0.8), radius: 1, x: 0, y: 1)
+    }
+}
+
+/// Slider on iPhone/iPad; Apple TV has no slider, so it steps instead.
+private struct GoldenPadSlider: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+
+    var body: some View {
+        #if os(tvOS)
+        Stepper(String(format: "%.2f�", value), value: $value, in: range, step: step)
+        #else
+        Slider(value: $value, in: range, step: step)
+        #endif
+    }
+}
+
+private extension View {
+    /// Apple TV: the Siri Remote's Back button would quit the app; during
+    /// play it opens and closes GoldenPad's menu instead.
+    @ViewBuilder
+    func goldenPadMenuCommand(_ action: @escaping () -> Void) -> some View {
+        #if os(tvOS)
+        focusable().onExitCommand(perform: action)
+        #else
+        self
+        #endif
+    }
+
+    /// The ROM picker on iPhone/iPad. Apple TV has no Files app; its build
+    /// always carries the ROM and imports it automatically.
+    @ViewBuilder
+    func goldenPadROMImporter(
+        isPresented: Binding<Bool>,
+        onCompletion: @escaping (Result<[URL], Error>) -> Void
+    ) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        fileImporter(
+            isPresented: isPresented,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false,
+            onCompletion: onCompletion
+        )
+        #endif
     }
 }

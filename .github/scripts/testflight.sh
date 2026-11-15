@@ -16,15 +16,22 @@
 set -euo pipefail
 
 rom=$1
-OUT="${RUNNER_TEMP:-/tmp}/testflight"
+# GOLDENPAD_PLATFORM=tvos builds the Apple TV app (same app record, tvOS platform).
+platform=${GOLDENPAD_PLATFORM:-ios}
+case "$platform" in
+  ios) sdk_name=iphoneos ;;
+  tvos) sdk_name=appletvos ;;
+  *) echo "::error::GOLDENPAD_PLATFORM must be ios or tvos"; exit 1 ;;
+esac
+OUT="${RUNNER_TEMP:-/tmp}/testflight-$platform"
 ARCHIVE="$OUT/GoldenPad.xcarchive"
 APP="$ARCHIVE/Products/Applications/GoldenPad.app"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 app_version=$(python3 -c 'import json; print(json.load(open("version.json"))["version"])')
 
-echo "▶ Building GoldenPad $GOLDENPAD_BUNDLE_ID $app_version ($BUILD_NUMBER)"
-bash scripts/build-personal-ipa.sh --rom "$rom" --work build-personal --output "$OUT/GoldenPad-unsigned.ipa"
+echo "▶ Building GoldenPad ($platform) $GOLDENPAD_BUNDLE_ID $app_version ($BUILD_NUMBER)"
+bash scripts/build-personal-ipa.sh --rom "$rom" --work build-personal --platform "$platform"   --output "$OUT/GoldenPad-unsigned.ipa"
 
 # ---------- the archive: the personal app, with my identity and the metadata Xcode's own archives carry
 mkdir -p "$ARCHIVE/Products/Applications"
@@ -32,18 +39,18 @@ ditto -x -k "$OUT/GoldenPad-unsigned.ipa" "$OUT/ipa"
 mv "$OUT/ipa/Payload/GoldenPad.app" "$APP"
 rm -f "$OUT/GoldenPad-unsigned.ipa"
 info="$APP/Info.plist"
-sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
-sdk_build=$(xcrun --sdk iphoneos --show-sdk-build-version)
+sdk_version=$(xcrun --sdk "$sdk_name" --show-sdk-version)
+sdk_build=$(xcrun --sdk "$sdk_name" --show-sdk-build-version)
 xcode_version=$(xcodebuild -version | sed -n 's/^Xcode //p')
 xcode_build=$(xcodebuild -version | sed -n 's/^Build version //p')
 xcode_digits=$(printf '%s' "$xcode_version" | awk -F. '{printf "%02d%d%d", $1, $2, $3}')
 plutil -replace CFBundleIdentifier -string "$GOLDENPAD_BUNDLE_ID" "$info"
 plutil -replace CFBundleShortVersionString -string "$app_version" "$info"
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$info"
-plutil -replace DTPlatformName -string iphoneos "$info"
+plutil -replace DTPlatformName -string "$sdk_name" "$info"
 plutil -replace DTPlatformVersion -string "$sdk_version" "$info"
 plutil -replace DTPlatformBuild -string "$sdk_build" "$info"
-plutil -replace DTSDKName -string "iphoneos$sdk_version" "$info"
+plutil -replace DTSDKName -string "$sdk_name$sdk_version" "$info"
 plutil -replace DTSDKBuild -string "$sdk_build" "$info"
 plutil -replace DTXcode -string "$xcode_digits" "$info"
 plutil -replace DTXcodeBuild -string "$xcode_build" "$info"

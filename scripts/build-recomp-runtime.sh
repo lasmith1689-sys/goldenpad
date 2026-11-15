@@ -2,7 +2,7 @@
 set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 sdk=${1:-iphoneos}
-case "$sdk" in iphoneos|iphonesimulator) system=iOS; target=17.0;; macosx) system=Darwin; target=13.0;; *) echo 'SDK must be iphoneos, iphonesimulator or macosx' >&2; exit 2;; esac
+case "$sdk" in iphoneos|iphonesimulator) system=iOS; target=17.0;; appletvos|appletvsimulator) system=tvOS; target=17.0;; macosx) system=Darwin; target=13.0;; *) echo 'SDK must be iphoneos, iphonesimulator, appletvos, appletvsimulator or macosx' >&2; exit 2;; esac
 build_jobs=${CMAKE_BUILD_PARALLEL_LEVEL:-8}
 case "$build_jobs" in
     0*|*[!0-9]*) echo 'CMAKE_BUILD_PARALLEL_LEVEL must be a positive integer.' >&2; exit 2;;

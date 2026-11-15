@@ -1092,6 +1092,7 @@ final class RecompPrototypeInput: ObservableObject {
     #endif
 }
 
+#if !os(tvOS)
 struct RecompPrototypeTouchControls: View {
     @ObservedObject var input: RecompPrototypeInput
     let placements: [RecompTouchPlacement]
@@ -1170,6 +1171,8 @@ struct RecompPrototypeTouchControls: View {
         .accessibilityLabel(placement.id.accessibilityLabel)
     }
 }
+
+#endif
 
 /// Mirrors GoldenEye's Rumble Pak motor on the connected controller's haptics.
 /// The game pulses its motor on and off to vary strength, so the per-tick
@@ -1277,6 +1280,7 @@ private extension SIMD2 where Scalar == Float {
     }
 }
 
+#if !os(tvOS)
 struct RecompStick: View {
     let title: String
     let symbol: String
@@ -1490,3 +1494,4 @@ struct RecompToggleButton: View {
             .accessibilityAddTraits(.isButton)
     }
 }
+#endif

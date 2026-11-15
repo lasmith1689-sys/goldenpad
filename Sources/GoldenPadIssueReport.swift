@@ -1,5 +1,29 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(tvOS)
+/// Apple TV has no Files app or share sheet, so the report is shown for
+/// reading only; diagnostics are still written to the support directory.
+struct GoldenPadIssueReport: View {
+    let context: String
+    let supportURL: URL
+    @Environment(\.dismiss) private var dismiss
+
+    init(context: String, supportURL: URL) {
+        self.context = context
+        self.supportURL = supportURL
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(context).font(.footnote).frame(maxWidth: .infinity, alignment: .leading).padding()
+            }
+            .navigationTitle("Diagnostics")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+#else
 #if os(iOS)
 import UIKit
 #endif
@@ -129,3 +153,4 @@ private struct GoldenPadReportDocument: FileDocument {
     init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
 }
+#endif

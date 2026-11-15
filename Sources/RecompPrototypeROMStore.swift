@@ -31,8 +31,7 @@ final class RecompPrototypeROMStore: ObservableObject {
     private var pendingOpenURL: URL?
 
     init() {
-        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        destinationURL = documents.appendingPathComponent("GoldenEye_TLBFREE.z64")
+        destinationURL = GoldenPadStorage.romDirectory.appendingPathComponent("GoldenEye_TLBFREE.z64")
         refresh()
     }
 

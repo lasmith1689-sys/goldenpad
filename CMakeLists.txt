@@ -567,6 +567,7 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
         Sources/RemoteControllerSession.swift
         Sources/RemoteControllerTransport.swift
         Sources/RemoteControllerViews.swift
+        Sources/GoldenPadSaveMirror.swift
         Sources/RecompPrototypeMetalCanvas.swift
         Sources/RecompPrototypeROMStore.swift
         Sources/RecompTouchFireState.swift

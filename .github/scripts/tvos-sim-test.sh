@@ -5,7 +5,10 @@
 # there), then a scripted "iPhone" finds it over Bonjour, joins and presses
 # Start, and the TV app's own log must show it seated the phone as the same
 # player the phone was told (1, or 2 if the simulator reports a gamepad) and
-# received the presses. No screenshots leave the runner.
+# received the presses. Then a stand-in save (random bytes) is put where the
+# game writes it, the app must keep a copy outside Caches, Caches is wiped as
+# tvOS does when space runs low, and after a relaunch the save must be back
+# byte for byte. No screenshots leave the runner.
 #
 # Usage: tvos-sim-test.sh GoldenPad.app
 set -euo pipefail
@@ -110,12 +113,36 @@ fi
 echo "--- console (last 25 lines) ---"
 tail -n 25 "$out/console.log" || true
 
+echo "== Save survives tvOS clearing Caches"
+data=$(xcrun simctl get_app_container "$dev" "$bundle" data)
+saves="$data/Library/Caches/GoldenPadRecomp/saves"
+mkdir -p "$saves"
+head -c 512 /dev/urandom > "$out/save.bin"
+cp "$out/save.bin" "$saves/ge007.us.bin"
+sleep 8
+grep -q "saves: kept ge007.us.bin" "$out/console.log" || failures+=("the TV app did not keep the save outside Caches")
+xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true
+kill "$launcher" 2>/dev/null || true
+sleep 3
+rm -rf "$data/Library/Caches/GoldenPadRecomp"
+[ ! -e "$saves/ge007.us.bin" ] && echo "Caches cleared"
+xcrun simctl launch --console-pty "$dev" "$bundle" --no-game > "$out/console2.log" 2>&1 &
+launcher=$!
+sleep 12
+if cmp -s "$out/save.bin" "$saves/ge007.us.bin"; then
+  echo "save is back after relaunch, same 512 bytes"
+else
+  failures+=("the save was not restored after Caches was cleared")
+fi
+grep -q "saves: restored ge007.us.bin" "$out/console2.log" || failures+=("the relaunched app did not log restoring the save")
+grep "saves:" "$out/console.log" "$out/console2.log" | sed 's/^.*\[GoldenPad\] //' || true
+
 kill "$launcher" 2>/dev/null || true
 xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true
-rm -f "$out"/*.png
+rm -f "$out"/*.png "$out/save.bin"
 
 if [ "${#failures[@]}" -gt 0 ]; then
   for f in "${failures[@]}"; do echo "::error::$f"; done
   exit 1
 fi
-echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player $player, received its Start presses and saw it leave"
+echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player $player, received its Start presses and saw it leave; a save survived Caches being cleared"

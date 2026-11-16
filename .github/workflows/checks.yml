@@ -23,6 +23,10 @@ jobs:
           swiftc -O Sources/RemoteControllerProtocol.swift Tests/RemoteControllerProtocolTests.swift \
             -parse-as-library -o "$RUNNER_TEMP/remote-controller-tests"
           "$RUNNER_TEMP/remote-controller-tests"
+      - name: Apple TV save mirror survives a cleared Caches folder
+        run: |
+          swiftc -O Sources/GoldenPadSaveMirror.swift Tests/GoldenPadSaveMirrorTests.swift             -parse-as-library -o "$RUNNER_TEMP/save-mirror-tests"
+          "$RUNNER_TEMP/save-mirror-tests"
       - name: Phone-to-TV loopback over real sockets
         run: |
           swiftc -O Sources/RemoteControllerProtocol.swift Sources/RemoteControllerTransport.swift \
@@ -52,6 +56,7 @@ jobs:
             Sources/RecompPrototypeInput.swift Sources/LANNetplayCoordinator.swift Sources/LANNetplayProtocol.swift
             Sources/RemoteControllerProtocol.swift Sources/RemoteControllerSession.swift
             Sources/RemoteControllerTransport.swift Sources/RemoteControllerViews.swift
+            Sources/GoldenPadSaveMirror.swift
             Sources/RecompPrototypeMetalCanvas.swift Sources/RecompPrototypeROMStore.swift
             Sources/RecompTouchFireState.swift Sources/RecompPrototypeTouchLayout.swift"
           status=0

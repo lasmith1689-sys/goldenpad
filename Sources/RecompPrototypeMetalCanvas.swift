@@ -111,6 +111,10 @@ final class RecompPrototypeSurface: ObservableObject {
         let romURL = GoldenPadStorage.romDirectory.appendingPathComponent("GoldenEye_TLBFREE.z64")
         guard FileManager.default.fileExists(atPath: romURL.path) else { return }
         let configURL = GoldenPadStorage.supportDirectory
+        #if os(tvOS)
+        // Put the save back first if tvOS cleared Caches since the last run.
+        GoldenPadStorage.saveMirror.restore()
+        #endif
         do {
             try FileManager.default.createDirectory(at: configURL, withIntermediateDirectories: true)
         } catch {
@@ -176,7 +180,7 @@ final class RecompPrototypeSurface: ObservableObject {
 /// Where GoldenPad keeps its converted ROM and runtime/save files.
 /// Apple TV apps cannot rely on persistent Documents or Application Support
 /// storage, so tvOS uses Caches; the bundled ROM is re-imported if the
-/// system purges it.
+/// system purges it, and the game's save is mirrored by `saveMirror`.
 enum GoldenPadStorage {
     static var romDirectory: URL {
         #if os(tvOS)
@@ -194,6 +198,12 @@ enum GoldenPadStorage {
         #endif
         return base.appendingPathComponent("GoldenPadRecomp", isDirectory: true)
     }
+
+    #if os(tvOS)
+    /// The runtime writes GoldenEye's EEPROM to `<support>/saves/ge007.us.bin`.
+    static let saveMirror = GoldenPadSaveMirror(
+        directory: supportDirectory.appendingPathComponent("saves", isDirectory: true))
+    #endif
 }
 
 struct RecompPrototypeMetalCanvas: UIViewRepresentable {

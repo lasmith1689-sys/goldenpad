@@ -68,6 +68,12 @@ Run **TestFlight (Apple TV)** (`testflight-tvos.yml`). It uploads to the same Ap
 (tvOS platform); Apple TV build numbers are run × 10 + attempt + 5. Install it from the TestFlight
 app on the Apple TV. The Siri Remote's Back button opens and closes GoldenPad's menu.
 
+tvOS gives apps no guaranteed file storage, so the game's files live in Caches, which tvOS may
+clear when space runs low. The save (512 bytes plus a backup) is copied into the app's settings
+store every few seconds and when the app goes to the background, and is written back at launch if
+it went missing (`Sources/GoldenPadSaveMirror.swift`; tested in Checks and the Apple TV simulator
+test by wiping Caches and relaunching).
+
 ## iPhones as controllers (up to four players)
 
 Open GoldenPad on the Apple TV, then open it on each iPhone on the same Wi-Fi. The iPhone offers

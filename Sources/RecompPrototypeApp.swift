@@ -234,6 +234,8 @@ struct GoldenPadApp: App {
                 #if os(tvOS)
                 input.remoteHost = remoteHost
                 remoteHost.start()
+                GoldenPadStorage.saveMirror.restore()
+                GoldenPadStorage.saveMirror.startWatching()
                 #endif
                 input.configureLookSensitivity(lookSensitivity)
                 input.configureAimBehavior(aimBehavior)
@@ -295,6 +297,9 @@ struct GoldenPadApp: App {
                     input.releaseTouchInput()
                     audio.deactivate()
                     surface.setAppActive(false)
+                    #if os(tvOS)
+                    GoldenPadStorage.saveMirror.capture()
+                    #endif
                 @unknown default:
                     input.releaseTouchInput()
                     audio.deactivate()

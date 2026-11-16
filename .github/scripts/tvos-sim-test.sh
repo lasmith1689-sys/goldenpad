@@ -97,7 +97,7 @@ python3 "$out/png_stats.py" "$out"/*.png || true
 
 echo "== What the TV app logged"
 grep "remote:" "$out/console.log" | sed 's/^.*\[GoldenPad\] //' | head -30 || true
-player=$(sed -n 's/^ok: joined as Player \([1-4]\)$//p' "$out/phone.log" | head -n 1)
+player=$(sed -n 's/^ok: joined as Player \([1-4]\)$/\1/p' "$out/phone.log" | head -n 1)
 if [ -z "$player" ]; then
   failures+=("the scripted iPhone was never given a player")
 else

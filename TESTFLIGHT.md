@@ -61,3 +61,23 @@ and strafes, right stick looks, RT fires, LT aims (the right stick keeps turning
 while aiming), A and LB use/open doors, X reloads, B crouches, Y and RB change weapon. GoldenEye's
 own Rumble Pak effects play on the controller. Settings ▸ Controller has look speed, full-tilt turn
 boost and rumble; Button mapping can reassign every face button, bumper and trigger.
+
+## Apple TV
+
+Run **TestFlight (Apple TV)** (`testflight-tvos.yml`). It uploads to the same App Store Connect app
+(tvOS platform); Apple TV build numbers are run × 10 + attempt + 5. Install it from the TestFlight
+app on the Apple TV. The Siri Remote's Back button opens and closes GoldenPad's menu.
+
+## iPhones as controllers (up to four players)
+
+Open GoldenPad on the Apple TV, then open it on each iPhone on the same Wi-Fi. The iPhone offers
+**Be a controller for <Apple TV>**; tap it and the phone shows the usual touch controls, which now
+drive the TV (the game does not run on the phone). The TV seats phones as Players 1–4; a game
+controller paired with the TV keeps Player 1 and phones take 2–4. Each phone buzzes with that
+player's Rumble Pak. **Leave** returns to the choice; **Play on this iPhone** plays on the phone.
+The first launch asks for Local Network permission on both devices: allow it.
+
+Tests: **Checks** (every push) runs the message-format and player-seating tests, a real phone-to-TV
+Bonjour/TCP loopback, a Swift type-check for iPhone and Apple TV, and the Apple TV icon compile.
+**Apple TV simulator test** runs the real Apple TV app (with `--no-game`, because the simulator's
+Metal cannot run RT64) and joins it from a scripted iPhone. Neither uploads screenshots.

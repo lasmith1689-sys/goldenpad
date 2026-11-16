@@ -3,8 +3,9 @@
 # personal Apple TV app and launches it with --no-game (the simulator's Metal
 # allows 31 buffers and RT64 needs 52, so the game itself cannot draw
 # there), then a scripted "iPhone" finds it over Bonjour, joins and presses
-# Start, and the TV app's own log must show it seated the phone as Player 1
-# and received the presses. No screenshots leave the runner.
+# Start, and the TV app's own log must show it seated the phone as the same
+# player the phone was told (1, or 2 if the simulator reports a gamepad) and
+# received the presses. No screenshots leave the runner.
 #
 # Usage: tvos-sim-test.sh GoldenPad.app
 set -euo pipefail
@@ -96,10 +97,16 @@ python3 "$out/png_stats.py" "$out"/*.png || true
 
 echo "== What the TV app logged"
 grep "remote:" "$out/console.log" | sed 's/^.*\[GoldenPad\] //' | head -30 || true
-grep -q "remote: iPhone joined as Player 1" "$out/console.log" || failures+=("the TV app never seated the phone as Player 1")
-grep -q "remote: player 1 buttons 0x1000" "$out/console.log" || failures+=("the TV app never received the phone's Start press")
-grep -q "remote: player 1 buttons 0x0000" "$out/console.log" || failures+=("the TV app never saw Start released")
-grep -q "Player 1's iPhone left" "$out/console.log" || failures+=("the TV app did not notice the phone leaving")
+player=$(sed -n 's/^ok: joined as Player \([1-4]\)$//p' "$out/phone.log" | head -n 1)
+if [ -z "$player" ]; then
+  failures+=("the scripted iPhone was never given a player")
+else
+  echo "phone says it is Player $player"
+  grep -q "remote: iPhone joined as Player $player" "$out/console.log" || failures+=("the TV app never seated the phone as Player $player")
+  grep -q "remote: player $player buttons 0x1000" "$out/console.log" || failures+=("the TV app never received the phone's Start press")
+  grep -q "remote: player $player buttons 0x0000" "$out/console.log" || failures+=("the TV app never saw Start released")
+  grep -q "Player $player's iPhone left" "$out/console.log" || failures+=("the TV app did not notice the phone leaving")
+fi
 echo "--- console (last 25 lines) ---"
 tail -n 25 "$out/console.log" || true
 
@@ -111,4 +118,4 @@ if [ "${#failures[@]}" -gt 0 ]; then
   for f in "${failures[@]}"; do echo "::error::$f"; done
   exit 1
 fi
-echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player 1, received its Start presses and saw it leave"
+echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player $player, received its Start presses and saw it leave"

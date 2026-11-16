@@ -43,6 +43,7 @@ final class RemoteControllerHost: ObservableObject {
     private let core = RemoteControllerHostCore()
     private var started = false
     private var loggedButtons: [Int: UInt16] = [:]
+    private var loggedReservedPort: Int?? = .none
     private var noticeTask: Task<Void, Never>?
 
     func start() {
@@ -98,6 +99,12 @@ final class RemoteControllerHost: ObservableObject {
             (mixer.setReservedPort(reservedPort), mixer.drain(now: now), mixer.slots.owners)
         }
         if !moved.isEmpty { refreshPlayers() }
+        if loggedReservedPort != .some(reservedPort) {
+            loggedReservedPort = .some(reservedPort)
+            NSLog("[GoldenPad] remote: %@", reservedPort == nil
+                ? "no game controller on the TV; phones start at Player 1"
+                : "a game controller on the TV holds Player 1; phones start at Player 2")
+        }
         for frame in frames where loggedButtons[frame.port] != frame.buttons {
             // (a few lines per press; the CI simulator test reads these)
             loggedButtons[frame.port] = frame.buttons

@@ -56,7 +56,7 @@ jobs:
             Sources/RecompPrototypeInput.swift Sources/LANNetplayCoordinator.swift Sources/LANNetplayProtocol.swift
             Sources/RemoteControllerProtocol.swift Sources/RemoteControllerSession.swift
             Sources/RemoteControllerTransport.swift Sources/RemoteControllerViews.swift
-            Sources/GoldenPadSaveMirror.swift
+            Sources/GoldenPadSaveMirror.swift Sources/GoldenPadCrashReport.swift
             Sources/RecompPrototypeMetalCanvas.swift Sources/RecompPrototypeROMStore.swift
             Sources/RecompTouchFireState.swift Sources/RecompPrototypeTouchLayout.swift"
           status=0
@@ -66,6 +66,30 @@ jobs:
             xcrun --sdk "$sdk" swiftc -typecheck -swift-version 5 -target "$triple" $files || status=1
           done
           exit $status
+      - name: Crash recorder compiles everywhere and records a crash
+        run: |
+          src=Support/RecompPrototype/goldenpad_crash_capture.cpp
+          for target in appletvos:arm64-apple-tvos17.0 iphoneos:arm64-apple-ios17.0 macosx:arm64-apple-macos14.0; do
+            sdk=${target%%:*}; triple=${target#*:}
+            echo "== $sdk"
+            xcrun --sdk "$sdk" clang++ -std=c++20 -Wall -Wextra -Werror -target "$triple" -c "$src" -o "$RUNNER_TEMP/crash-$sdk.o"
+          done
+          xcrun clang++ -std=c++20 -g "$src" Tests/GoldenPadCrashCaptureTest.cpp -o "$RUNNER_TEMP/crash-test"
+          logs="$RUNNER_TEMP/crash-logs"; rm -rf "$logs"
+          if "$RUNNER_TEMP/crash-test" "$logs"; then echo "::error::the test program did not crash"; exit 1; fi
+          echo "--- crash-latest.txt"; cat "$logs/crash-latest.txt"
+          echo "--- stdio-latest.log"; cat "$logs/stdio-latest.log"
+          grep -q "crash: SIGSEGV" "$logs/crash-latest.txt"
+          grep -q "last stage: crash test" "$logs/crash-latest.txt"
+          grep -q "backtrace:" "$logs/crash-latest.txt"
+          grep -q "goldenpad_crash_test" "$logs/crash-latest.txt"
+          grep -q "crash capture ready" "$logs/stdio-latest.log"
+          grep -q "printed to stdout before the crash" "$logs/stdio-latest.log"
+          grep -q "stage: renderer: initializing (test)" "$logs/stdio-latest.log"
+          # a second run rotates the first crash to crash-previous.txt
+          "$RUNNER_TEMP/crash-test" "$logs" || true
+          grep -q "crash: SIGSEGV" "$logs/crash-previous.txt"
+          echo "PASS: crash recorder"
       - name: Compile the Apple TV icon catalog
         run: |
           out="$RUNNER_TEMP/actool"; mkdir -p "$out"

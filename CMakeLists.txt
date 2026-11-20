@@ -272,6 +272,7 @@ if(goldenpad_apple_platform STREQUAL "mac")
         "${GOLDENPAD_RECOMP_AOT_DIR}/rsp/aspMain.cpp"
         Support/RecompPrototype/recomp_aot_link_bridge.cpp
         Support/RecompPrototype/recomp_game_start.cpp
+        Support/RecompPrototype/goldenpad_crash_capture.cpp
         Support/RecompPrototype/performance_diagnostics.mm
         Support/RecompPrototype/recomp_register_overlays.cpp
         Support/RecompPrototype/recomp_ultra_shims.cpp
@@ -568,6 +569,8 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
         Sources/RemoteControllerTransport.swift
         Sources/RemoteControllerViews.swift
         Sources/GoldenPadSaveMirror.swift
+        Sources/GoldenPadCrashReport.swift
+        Support/RecompPrototype/goldenpad_crash_capture.cpp
         Sources/RecompPrototypeMetalCanvas.swift
         Sources/RecompPrototypeROMStore.swift
         Sources/RecompTouchFireState.swift

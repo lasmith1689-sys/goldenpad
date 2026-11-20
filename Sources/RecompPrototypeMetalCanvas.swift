@@ -96,8 +96,10 @@ final class RecompPrototypeSurface: ObservableObject {
         #endif
         let window = Unmanaged.passUnretained(view).toOpaque()
         let metalLayer = Unmanaged.passUnretained(layer).toOpaque()
+        GoldenPadCrashReport.note("renderer: initializing RT64, drawable \(Int(view.drawableSize.width))x\(Int(view.drawableSize.height))")
         if let message = goldenPadRecompRT64Initialize(window, metalLayer) {
             status = String(cString: message)
+            GoldenPadCrashReport.note("renderer: \(status)")
             rendererInitialized = true
             requestStagedGameLaunch(window: window, layer: metalLayer)
         } else {
@@ -121,6 +123,7 @@ final class RecompPrototypeSurface: ObservableObject {
             status = "AOT runtime: cannot create private support directory"
             return
         }
+        GoldenPadCrashReport.note("game: starting the recompiled runtime")
         let launchStatus = romURL.path.withCString { romPath in
             configURL.path.withCString { configPath in
                 goldenPadRecompStartGame(window, layer, romPath, configPath)
@@ -128,6 +131,7 @@ final class RecompPrototypeSurface: ObservableObject {
         }
         if let launchStatus {
             status = String(cString: launchStatus)
+            GoldenPadCrashReport.note("game: \(status)")
             gameLaunchRequested = true
             startStatusPolling()
         }
@@ -216,6 +220,10 @@ struct RecompPrototypeMetalCanvas: UIViewRepresentable {
     func makeCoordinator() -> Renderer { Renderer(surface: surface) }
 
     func makeUIView(context: Context) -> MTKView {
+        #if os(tvOS)
+        GoldenPadCrashReport.gameStarting()
+        GoldenPadCrashReport.note("graphics: resolution \(resolutionMode.rawValue), MSAA \(msaaEnabled ? "on" : "off"), aspect \(aspectMode.rawValue)")
+        #endif
         goldenPadRecompSetMSAAEnabled(msaaEnabled ? 1 : 0)
         goldenPadRecompSetResolutionMode(resolutionMode.nativeValue)
         goldenPadRecompSetThreePointFiltering(threePointFiltering ? 1 : 0)

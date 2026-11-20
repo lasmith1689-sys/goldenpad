@@ -352,6 +352,8 @@ uint64_t monotonicMilliseconds() {
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
+extern "C" void goldenpad_crash_note(const char *text);
+
 void logEvent(const char *event, const char *format, ...) {
     char detail[768];
     va_list arguments;
@@ -359,6 +361,14 @@ void logEvent(const char *event, const char *format, ...) {
     std::vsnprintf(detail, sizeof(detail), format, arguments);
     va_end(arguments);
     goldenpad_diagnostics_event(event, detail);
+    // The first events also go straight to the crash log (unbuffered), so a
+    // crash during start-up shows how far the runtime got.
+    static std::atomic<int> mirrored{0};
+    if (mirrored.fetch_add(1, std::memory_order_relaxed) < 400) {
+        char line[900];
+        std::snprintf(line, sizeof(line), "%s: %s", event, detail);
+        goldenpad_crash_note(line);
+    }
 }
 
 int32_t readGameWord(uint8_t *rdram, uint32_t address);

@@ -94,6 +94,16 @@ struct GoldenPadApp: App {
     @State private var isUtilityMenuPresented = false
     @State private var offlineLaunchRequested =
         ProcessInfo.processInfo.arguments.contains("--lan-netplay-auto-offline")
+    /// Apple TV: what the previous launch recorded when it crashed; shown
+    /// instead of starting the game until a button is chosen.
+    @State private var tvCrashReport: String?
+
+    init() {
+        #if os(tvOS)
+        GoldenPadCrashReport.install()
+        _tvCrashReport = State(initialValue: GoldenPadCrashReport.previous)
+        #endif
+    }
 
     private var lanLabEnabled: Bool {
         #if GOLDENPAD_LAN_NETPLAY_LAB
@@ -143,13 +153,7 @@ struct GoldenPadApp: App {
                     ZStack(alignment: .topTrailing) {
                 Color.black
                     .ignoresSafeArea()
-                if ProcessInfo.processInfo.arguments.contains("--no-game") {
-                    // CI: the Apple TV simulator's Metal cannot run RT64 (31
-                    // buffer limit), so the controller test runs without it.
-                    Color.black.ignoresSafeArea()
-                } else {
-                    gameSurfaceView
-                }
+                gameAreaView
                 // The CAMetalLayer can leave a two-physical-pixel sampling
                 // seam at the display's far edge. One opaque point masks that
                 // host seam without changing RT64's drawable or viewport.
@@ -299,6 +303,7 @@ struct GoldenPadApp: App {
                     surface.setAppActive(false)
                     #if os(tvOS)
                     GoldenPadStorage.saveMirror.capture()
+                    GoldenPadCrashReport.gameSettled()
                     #endif
                 @unknown default:
                     input.releaseTouchInput()
@@ -428,6 +433,27 @@ struct GoldenPadApp: App {
     }
 
     @ViewBuilder
+    @ViewBuilder
+    private var gameAreaView: some View {
+        if let report = tvCrashReport {
+            GoldenPadCrashReportView(report: report) { safeGraphics in
+                if safeGraphics {
+                    msaaEnabled = false
+                    resolutionMode = RecompPrototypeResolutionMode.native.rawValue
+                }
+                GoldenPadCrashReport.note(safeGraphics ? "starting again with safe graphics" : "starting again")
+                GoldenPadCrashReport.dismiss()
+                tvCrashReport = nil
+            }
+        } else if ProcessInfo.processInfo.arguments.contains("--no-game") {
+            // CI: the Apple TV simulator's Metal cannot run RT64 (31
+            // buffer limit), so the controller test runs without it.
+            Color.black.ignoresSafeArea()
+        } else {
+            gameSurfaceView
+        }
+    }
+
     private var gameSurfaceView: some View {
         let canvas = RecompPrototypeMetalCanvas(
             surface: surface,

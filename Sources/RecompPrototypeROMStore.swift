@@ -141,9 +141,11 @@ final class RecompPrototypeROMStore: ObservableObject {
                 return
             }
 
+            GoldenPadCrashReport.note("rom: converting the game file")
             let result = await Task.detached(priority: .userInitiated) {
                 Self.convertROM(source: sourceURL, patch: patchURL, output: temporaryURL)
             }.value
+            GoldenPadCrashReport.note("rom: conversion finished with result \(result)")
             guard result == 0 else {
                 state = .failed(Self.message(for: result))
                 return

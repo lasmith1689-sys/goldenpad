@@ -8,7 +8,9 @@
 # received the presses. Then a stand-in save (random bytes) is put where the
 # game writes it, the app must keep a copy outside Caches, Caches is wiped as
 # tvOS does when space runs low, and after a relaunch the save must be back
-# byte for byte. No screenshots leave the runner.
+# byte for byte. Last, the app crashes on purpose (--crash-test): it must
+# record the signal and a backtrace, and the next launch must show the crash
+# report instead of starting the game. No screenshots leave the runner.
 #
 # Usage: tvos-sim-test.sh GoldenPad.app
 set -euo pipefail
@@ -31,7 +33,7 @@ echo "Simulator $dev"
 xcrun simctl boot "$dev" 2>/dev/null || true
 xcrun simctl bootstatus "$dev" -b > /dev/null
 xcrun simctl install "$dev" "$app"
-xcrun simctl launch --console-pty "$dev" "$bundle" --no-game > "$out/console.log" 2>&1 &
+xcrun simctl launch --console-pty "$dev" "$bundle" --no-game --keep-console > "$out/console.log" 2>&1 &
 launcher=$!
 
 # A tiny PNG reader (no Pillow on the runner): fraction of non-black pixels
@@ -126,7 +128,7 @@ kill "$launcher" 2>/dev/null || true
 sleep 3
 rm -rf "$data/Library/Caches/GoldenPadRecomp"
 [ ! -e "$saves/ge007.us.bin" ] && echo "Caches cleared"
-xcrun simctl launch --console-pty "$dev" "$bundle" --no-game > "$out/console2.log" 2>&1 &
+xcrun simctl launch --console-pty "$dev" "$bundle" --no-game --keep-console > "$out/console2.log" 2>&1 &
 launcher=$!
 sleep 12
 if cmp -s "$out/save.bin" "$saves/ge007.us.bin"; then
@@ -137,6 +139,31 @@ fi
 grep -q "saves: restored ge007.us.bin" "$out/console2.log" || failures+=("the relaunched app did not log restoring the save")
 grep "saves:" "$out/console.log" "$out/console2.log" | sed 's/^.*\[GoldenPad\] //' || true
 
+echo "== Crash is recorded and shown on the next launch"
+xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true
+kill "$launcher" 2>/dev/null || true
+sleep 3
+logs="$data/Library/Caches/GoldenPadRecomp/Logs"
+xcrun simctl launch --console-pty "$dev" "$bundle" --no-game --crash-test > "$out/console3.log" 2>&1 &
+launcher=$!
+sleep 10
+echo "--- crash-latest.txt (first 12 lines) ---"
+head -n 12 "$logs/crash-latest.txt" 2>/dev/null || echo "(missing)"
+grep -q "crash: SIGSEGV" "$logs/crash-latest.txt" 2>/dev/null || failures+=("the crash recorder did not write the signal")
+grep -q "last stage: crash test" "$logs/crash-latest.txt" 2>/dev/null || failures+=("the crash recorder did not write the last stage")
+grep -q "backtrace:" "$logs/crash-latest.txt" 2>/dev/null || failures+=("the crash recorder did not write a backtrace")
+grep -q "goldenpad_crash_test" "$logs/crash-latest.txt" 2>/dev/null || echo "::warning::the backtrace has no symbol names (stripped build?)"
+grep -q "crash capture ready" "$logs/stdio-latest.log" 2>/dev/null || failures+=("stdout/stderr were not sent to the app's log file")
+grep -q "stage: app launched" "$logs/stdio-latest.log" 2>/dev/null || failures+=("start-up stages were not logged")
+grep "crash capture ready" "$logs/stdio-latest.log" 2>/dev/null | sed 's/^.*\[GoldenPad\] //' || true
+kill "$launcher" 2>/dev/null || true
+xcrun simctl launch --console-pty "$dev" "$bundle" --no-game --keep-console > "$out/console4.log" 2>&1 &
+launcher=$!
+sleep 12
+grep "crash report:" "$out/console4.log" | sed 's/^.*\[GoldenPad\] //' || true
+grep -q "crash report: the previous launch crash: SIGSEGV" "$out/console4.log" || failures+=("the next launch did not pick up the crash")
+grep -q "crash report: on screen" "$out/console4.log" || failures+=("the next launch did not show the crash report")
+
 kill "$launcher" 2>/dev/null || true
 xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true
 rm -f "$out"/*.png "$out/save.bin"
@@ -145,4 +172,4 @@ if [ "${#failures[@]}" -gt 0 ]; then
   for f in "${failures[@]}"; do echo "::error::$f"; done
   exit 1
 fi
-echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player $player, received its Start presses and saw it leave; a save survived Caches being cleared"
+echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player $player, received its Start presses and saw it leave; a save survived Caches being cleared; a crash was recorded and shown on the next launch"

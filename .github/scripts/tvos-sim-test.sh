@@ -10,7 +10,12 @@
 # tvOS does when space runs low, and after a relaunch the save must be back
 # byte for byte. Last, the app crashes on purpose (--crash-test): it must
 # record the signal and a backtrace, and the next launch must show the crash
-# report instead of starting the game. No screenshots leave the runner.
+# report instead of starting the game. Throughout, the app's Application
+# Support and Documents folders are read-only, as on a real Apple TV (only
+# Caches and tmp are writable there; the simulator normally allows all), and
+# finally the game itself is started once: the simulator cannot draw it (31
+# Metal buffers), but RT64 must get past creating its data folder, which is
+# what crashed on the Apple TV. No screenshots leave the runner.
 #
 # Usage: tvos-sim-test.sh GoldenPad.app
 set -euo pipefail
@@ -33,6 +38,13 @@ echo "Simulator $dev"
 xcrun simctl boot "$dev" 2>/dev/null || true
 xcrun simctl bootstatus "$dev" -b > /dev/null
 xcrun simctl install "$dev" "$app"
+# Apple TV hardware: Library/Application Support cannot be created and
+# Documents is not writable.
+data=$(xcrun simctl get_app_container "$dev" "$bundle" data)
+rm -rf "$data/Library/Application Support"
+mkdir -p "$data/Library/Application Support" "$data/Documents"
+chmod 555 "$data/Library/Application Support" "$data/Documents"
+if touch "$data/Documents/probe" 2>/dev/null; then echo "::warning::could not make Documents read-only"; fi
 xcrun simctl launch --console-pty "$dev" "$bundle" --no-game --keep-console > "$out/console.log" 2>&1 &
 launcher=$!
 
@@ -164,6 +176,30 @@ grep "crash report:" "$out/console4.log" | sed 's/^.*\[GoldenPad\] //' || true
 grep -q "crash report: the previous launch crash: SIGSEGV" "$out/console4.log" || failures+=("the next launch did not pick up the crash")
 grep -q "crash report: on screen" "$out/console4.log" || failures+=("the next launch did not show the crash report")
 
+echo "== Game start with Apple TV folder rules"
+xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true
+kill "$launcher" 2>/dev/null || true
+sleep 3
+# (clear the crash-test leftovers so the game starts instead of the report)
+rm -f "$logs"/crash-*.txt "$logs/tv-game-starting.marker"
+xcrun simctl launch --console-pty "$dev" "$bundle" > "$out/console5.log" 2>&1 &
+launcher=$!
+sleep 40
+echo "--- start-up stages (last 25) ---"
+grep -h "stage:\|RT64\|crash" "$logs/stdio-latest.log" 2>/dev/null | sed 's/^.*\[GoldenPad\] //' | tail -n 25 || true
+echo "--- crash-latest.txt ---"
+head -n 8 "$logs/crash-latest.txt" 2>/dev/null || echo "(no crash recorded)"
+if [ -d "$data/Library/Caches/GoldenPadRecompRT64" ]; then
+  echo "RT64 data folder is in Caches"
+else
+  failures+=("RT64 did not create its data folder in Caches")
+fi
+if grep -qi "filesystem\|Application Support" "$logs/crash-latest.txt" 2>/dev/null; then
+  failures+=("the game start still crashed on a folder it cannot create")
+fi
+grep -q "stage: game: starting the recompiled runtime" "$logs/stdio-latest.log" 2>/dev/null \
+  || failures+=("the game never got as far as starting the runtime")
+
 kill "$launcher" 2>/dev/null || true
 xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true
 rm -f "$out"/*.png "$out/save.bin"
@@ -172,4 +208,4 @@ if [ "${#failures[@]}" -gt 0 ]; then
   for f in "${failures[@]}"; do echo "::error::$f"; done
   exit 1
 fi
-echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player $player, received its Start presses and saw it leave; a save survived Caches being cleared; a crash was recorded and shown on the next launch"
+echo "PASS: the Apple TV app advertised itself, seated a scripted iPhone as Player $player, received its Start presses and saw it leave; a save survived Caches being cleared; a crash was recorded and shown on the next launch; RT64 started with Apple TV folder rules"

@@ -433,7 +433,6 @@ struct GoldenPadApp: App {
     }
 
     @ViewBuilder
-    @ViewBuilder
     private var gameAreaView: some View {
         if let report = tvCrashReport {
             GoldenPadCrashReportView(report: report) { safeGraphics in
@@ -454,6 +453,7 @@ struct GoldenPadApp: App {
         }
     }
 
+    @ViewBuilder
     private var gameSurfaceView: some View {
         let canvas = RecompPrototypeMetalCanvas(
             surface: surface,

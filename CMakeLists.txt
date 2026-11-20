@@ -507,6 +507,16 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
             message(FATAL_ERROR
                 "GoldenEye64Recomp is missing patches/goldeneye64recomp-ios-prototype-render-trace.patch; a clean iOS install would crash while RT64 creates its data directory")
         endif()
+        # Apple TV: compile a copy whose RT64 data folder can be created there
+        # (see cmake/GoldenPadRT64RenderContext.cmake).
+        include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/GoldenPadRT64RenderContext.cmake")
+        set(goldenpad_recomp_render_context_original "${goldenpad_recomp_render_context}")
+        set(goldenpad_recomp_render_context "${CMAKE_CURRENT_BINARY_DIR}/goldenpad_rt64_render_context.cpp")
+        goldenpad_write_rt64_render_context(
+            "${goldenpad_recomp_render_context_original}" "${goldenpad_recomp_render_context}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${goldenpad_recomp_render_context_original}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GoldenPadRT64RenderContext.cmake")
         set(goldenpad_recomp_rom_patch
             "${GOLDENPAD_RECOMP_REFERENCE_SOURCE_DIR}/vanilla_to_tlbfree.gep1")
         if(NOT EXISTS "${goldenpad_recomp_rom_patch}")

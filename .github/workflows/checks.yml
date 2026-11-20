@@ -90,6 +90,24 @@ jobs:
           "$RUNNER_TEMP/crash-test" "$logs" || true
           grep -q "crash: SIGSEGV" "$logs/crash-previous.txt"
           echo "PASS: crash recorder"
+      - name: RT64 data folder fix applies to the pinned render context
+        run: |
+          git submodule update --init --depth 1 vendor/goldeneye
+          src=vendor/goldeneye/src/main/rt64_render_context.cpp
+          out="$RUNNER_TEMP/goldenpad_rt64_render_context.cpp"
+          cmake -DINPUT="$PWD/$src" -DOUTPUT="$out" -P cmake/GoldenPadRT64RenderContext.cmake
+          echo "--- generated changes"; diff <(sed 1,11d "$out") "$src" || true
+          grep -q '#define GOLDENPAD_RT64_DATA_SUBDIR "Library/Caches/GoldenPadRecompRT64"' "$out"
+          grep -q 'std::getenv("HOME")) / GOLDENPAD_RT64_DATA_SUBDIR;' "$out"
+          grep -q 'std::filesystem::create_directories(appConfig.dataPath, goldenpadFolderError);' "$out"
+          grep -q 'RT64 runs without it\\n' "$out"
+          if grep -q '"Library/Application Support/GoldenPadRecompRT64";' "$out"; then echo "::error::old path still there"; exit 1; fi
+          [ "$(grep -c 'app = std::make_unique<RT64::Application>(appCore, appConfig);' "$out")" = 1 ]
+          # the preamble itself must compile for Apple TV and pick Caches there
+          sed -n 1,10p "$out" > "$RUNNER_TEMP/preamble.cpp"
+          printf '%s\n' 'static_assert(sizeof(GOLDENPAD_RT64_DATA_SUBDIR) == sizeof("Library/Caches/GoldenPadRecompRT64"));' >> "$RUNNER_TEMP/preamble.cpp"
+          xcrun --sdk appletvos clang++ -std=c++20 -target arm64-apple-tvos17.0 -fsyntax-only "$RUNNER_TEMP/preamble.cpp"
+          echo "PASS: RT64 data folder fix"
       - name: Compile the Apple TV icon catalog
         run: |
           out="$RUNNER_TEMP/actool"; mkdir -p "$out"

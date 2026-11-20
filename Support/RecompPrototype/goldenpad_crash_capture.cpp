@@ -199,11 +199,14 @@ extern "C" void goldenpad_crash_capture_install(const char *logsDirectory, int32
     std::fprintf(stderr, "[GoldenPad] crash capture ready: device=%s memory=%llu MB available_to_app=%llu MB time=%ld\n",
         model, static_cast<unsigned long long>(physical >> 20), available >> 20, static_cast<long>(std::time(nullptr)));
 
+#if !TARGET_OS_TV
+    // (a separate signal stack so stack overflows are recorded too; tvOS has no sigaltstack)
     static char alternateStack[128 * 1024];
     stack_t stack {};
     stack.ss_sp = alternateStack;
     stack.ss_size = sizeof(alternateStack);
     sigaltstack(&stack, nullptr);
+#endif
     for (int signal : kSignals) {
         struct sigaction action {};
         action.sa_sigaction = onSignal;

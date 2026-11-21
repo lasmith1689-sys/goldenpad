@@ -359,7 +359,7 @@ struct RemoteControllerPadView: View {
             }
             return "Waiting for a free player on \(name)"
         case .lost(let reason):
-            return reason + " Retrying…"
+            return reason + " Retryingâ€¦"
         }
     }
 }

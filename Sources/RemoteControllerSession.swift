@@ -101,7 +101,7 @@ final class RemoteControllerHost: ObservableObject {
         }
         core.server.onFailed = { [weak self] message in
             NSLog("[GoldenPad] remote: listener stopped (%@); restarting", message)
-            Task { @MainActor in self?.problem = "iPhones can't connect right now: \(message). Retrying…" }
+            Task { @MainActor in self?.problem = "iPhones can't connect right now: \(message). Retryingâ€¦" }
             core.server.queue.asyncAfter(deadline: .now() + 2) { core.server.restartIfNeeded() }
         }
         core.server.onReady = { [weak self] port in

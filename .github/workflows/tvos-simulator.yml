@@ -62,6 +62,9 @@ jobs:
       - name: Build the Apple TV simulator app
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: '3'
+          # (RT64 without its ray-tracing descriptors fits the simulator's
+          # 31 Metal buffers, so the game can draw there; test builds only)
+          GOLDENPAD_RT64_SIMULATOR_RESOURCE_LIMITS: 'ON'
         run: |
           bash scripts/build-personal-ipa.sh --rom "$RUNNER_TEMP/rom/GoldenEye.z64" --work build-personal             --platform tvos-sim --output "$RUNNER_TEMP/sim/GoldenPad.app"
       - name: Launch, check frames, play with a scripted iPhone

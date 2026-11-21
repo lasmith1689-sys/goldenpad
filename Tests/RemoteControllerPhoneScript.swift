@@ -53,6 +53,10 @@ struct RemoteControllerPhoneScript {
         guard let player else { fail("the TV had no free player") }
         print("ok: joined as Player \(player + 1)")
 
+        if ProcessInfo.processInfo.environment["PHONE_SCRIPT"] == "solo-walk" {
+            soloWalk(link: link, statuses: statuses, state: state, player: player)
+        }
+
         // ~60 frames a second, like the app: press Start for 0.1 s every 2 s.
         let seconds = Double(ProcessInfo.processInfo.environment["PHONE_SECONDS"] ?? "") ?? 20
         let frames = Int(seconds * 60)
@@ -76,4 +80,61 @@ struct RemoteControllerPhoneScript {
         print("PASS: phone script played as Player \(player + 1)")
         exit(0)
     }
+}
+
+/// PHONE_SCRIPT=solo-walk (game running on the TV, this phone Player 1):
+/// press Start through GoldenEye's front end until the TV reports gameplay,
+/// then walk forward, sidestep and turn, printing each phase so the TV's own
+/// log can be lined up against it.
+private func soloWalk(
+    link: RemoteControllerLink,
+    statuses: Box<[RemoteControllerStatus]>,
+    state: Box<RemoteControllerLink.State?>,
+    player: Int
+) -> Never {
+    func inGameplay() -> Bool { statuses.read { $0.last?.gameplay ?? false } }
+    func send(_ input: RemoteControllerInput, frames: Int) {
+        for _ in 0..<frames {
+            link.send(input)
+            RunLoop.current.run(until: Date().addingTimeInterval(1.0 / 60.0))
+            if case .ended(let reason) = state.read({ $0 }) {
+                fail("the TV dropped the connection: \(reason ?? "closed")")
+            }
+        }
+    }
+    let timeout = Double(ProcessInfo.processInfo.environment["PHONE_GAMEPLAY_TIMEOUT"] ?? "") ?? 150
+    let started = Date()
+    var presses = 0
+    var start = RemoteControllerInput()
+    start.buttons = 0x1000
+    while !inGameplay() {
+        if Date().timeIntervalSince(started) > timeout {
+            fail("no gameplay after \(presses) Start presses in \(Int(timeout)) s")
+        }
+        send(start, frames: 6)
+        presses += 1
+        print("phase: start press \(presses) at \(Int(Date().timeIntervalSince(started))) s")
+        send(RemoteControllerInput(), frames: 84)
+    }
+    print("ok: gameplay after \(presses) Start presses (\(Int(Date().timeIntervalSince(started))) s)")
+    send(RemoteControllerInput(), frames: 120)
+    var walk = RemoteControllerInput()
+    walk.stick = SIMD2(0, 1)
+    print("phase: walk forward 3 s")
+    send(walk, frames: 180)
+    send(RemoteControllerInput(), frames: 60)
+    walk.stick = SIMD2(1, 0)
+    print("phase: sidestep right 2 s")
+    send(walk, frames: 120)
+    send(RemoteControllerInput(), frames: 60)
+    var turn = RemoteControllerInput()
+    turn.look = SIMD2(0.3, 0)
+    print("phase: turn right 1 s")
+    send(turn, frames: 60)
+    send(RemoteControllerInput(), frames: 120)
+    print("phase: done; still in gameplay: \(inGameplay())")
+    link.cancel()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+    print("PASS: phone walked as Player \(player + 1)")
+    exit(0)
 }

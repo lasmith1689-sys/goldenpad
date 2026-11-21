@@ -310,6 +310,7 @@ final class RecompPrototypeInput: ObservableObject {
     var remoteHost: RemoteControllerHost?
     /// iPhone: when connected, the touch controls drive an Apple TV instead.
     var remoteClient: RemoteControllerClient?
+    private let ignoreLocalGamepads = ProcessInfo.processInfo.arguments.contains("--ignore-tv-gamepads")
     private var remoteCrouchPresses: UInt8 = 0
     private var remotePortsMask: Int32 = -1
     private var touchButtons: UInt16 = 0
@@ -617,7 +618,10 @@ final class RecompPrototypeInput: ObservableObject {
     private func refreshController() {
         let previousOwnership = ownershipRoute
         let previousController = controller
-        let availableControllers = GCController.controllers().filter { $0.extendedGamepad != nil }
+        // (--ignore-tv-gamepads: the simulator test needs its scripted phone
+        // to be Player 1, and the tvOS simulator reports a gamepad of its own)
+        let availableControllers = ignoreLocalGamepads ? [] :
+            GCController.controllers().filter { $0.extendedGamepad != nil }
         if let previousController,
            availableControllers.contains(where: { $0 === previousController }) {
             controller = previousController
@@ -797,7 +801,8 @@ final class RecompPrototypeInput: ObservableObject {
         let gameplayActive = goldenPadRecompGameplayInputActive() != 0
         let remoteFrames = remoteHost?.tick(
             reservedPort: route.externalPort.map(Int.init),
-            rumble: { goldenPadRecompGetRumble(Int32($0)) != 0 }
+            rumble: { goldenPadRecompGetRumble(Int32($0)) != 0 },
+            gameplay: { self.runtimeInputContext(port: Int32($0)).gameplayActive }
         ) ?? []
         var remoteByPort: [Int32: RemotePlayerFrame] = [:]
         var nextRemoteMask: Int32 = 0

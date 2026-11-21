@@ -37,7 +37,7 @@ struct RemoteControllerProtocolTests {
         try expect(RemoteControllerInput(data.prefix(10)) == nil, "short frame rejected")
 
         // Status round trip.
-        for status in [RemoteControllerStatus(player: 2, rumble: true), RemoteControllerStatus(player: nil, rumble: false)] {
+        for status in [RemoteControllerStatus(player: 2, rumble: true), RemoteControllerStatus(player: nil, rumble: false), RemoteControllerStatus(player: 0, rumble: false, gameplay: true)] {
             guard let back = RemoteControllerStatus(status.encoded()) else {
                 throw ProtocolTestFailure(description: "status frame decodes")
             }

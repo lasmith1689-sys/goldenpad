@@ -182,9 +182,9 @@ kill "$launcher" 2>/dev/null || true
 sleep 3
 # (clear the crash-test leftovers so the game starts instead of the report)
 rm -f "$logs"/crash-*.txt "$logs/tv-game-starting.marker"
-xcrun simctl launch --console-pty "$dev" "$bundle" > "$out/console5.log" 2>&1 &
+xcrun simctl launch --console-pty "$dev" "$bundle" --ignore-tv-gamepads > "$out/console5.log" 2>&1 &
 launcher=$!
-sleep 40
+sleep 30
 echo "--- start-up stages (last 25) ---"
 grep -h "stage:\|RT64\|crash" "$logs/stdio-latest.log" 2>/dev/null | sed 's/^.*\[GoldenPad\] //' | tail -n 25 || true
 echo "--- crash-latest.txt ---"
@@ -199,6 +199,23 @@ if grep -qi "filesystem\|Application Support" "$logs/crash-latest.txt" 2>/dev/nu
 fi
 grep -q "stage: game: starting the recompiled runtime" "$logs/stdio-latest.log" 2>/dev/null \
   || failures+=("the game never got as far as starting the runtime")
+
+echo "== Gameplay driven by a scripted iPhone (Player 1)"
+# The simulator build uses RT64's reduced resource set (no ray-tracing
+# descriptors), so the game can draw here. The phone presses Start through
+# the front end until the TV says it is in gameplay, then walks and turns.
+if PHONE_SCRIPT=solo-walk PHONE_GAMEPLAY_TIMEOUT=180 "$out/phone" | tee "$out/phone-walk.log"; then
+  echo "scripted phone reached gameplay"
+else
+  failures+=("the scripted phone could not play a level on the TV")
+fi
+diag="$logs/goldenpad-recomp-latest.log"
+echo "--- TV runtime log: input (last 60) ---"
+grep -h -e "input-context" -e "left stick" -e "controller 1 buttons" -e "phone controllers" "$diag" 2>/dev/null | tail -n 60 || echo "(no runtime log at $diag)"
+echo "--- TV runtime log: player position (last 30) ---"
+grep -h -o -e "pos=([^)]*)" -e "yaw=[-0-9.]*" "$diag" 2>/dev/null | paste - - | tail -n 30 || true
+echo "--- crash-latest.txt ---"
+head -n 8 "$logs/crash-latest.txt" 2>/dev/null || echo "(no crash recorded)"
 
 kill "$launcher" 2>/dev/null || true
 xcrun simctl terminate "$dev" "$bundle" 2>/dev/null || true

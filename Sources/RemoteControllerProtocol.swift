@@ -71,21 +71,25 @@ struct RemoteControllerInput: Equatable {
     }
 }
 
-/// TV -> phone: which player this phone is, and whether its rumble motor is on.
+/// TV -> phone: which player this phone is, whether its rumble motor is on,
+/// and whether that player is in gameplay (not in menus or behind the watch).
 struct RemoteControllerStatus: Equatable {
     static let size = 4
 
     /// 0...3, or nil while the TV has no free player for this phone.
     var player: Int?
     var rumble = false
+    /// The player is moving around a level (byte 3, bit 0; older TVs send 0).
+    var gameplay = false
 
     func encoded() -> Data {
-        Data([RemoteControllerWire.version, UInt8(player ?? 0xFF), rumble ? 1 : 0, 0])
+        Data([RemoteControllerWire.version, UInt8(player ?? 0xFF), rumble ? 1 : 0, gameplay ? 1 : 0])
     }
 
-    init(player: Int?, rumble: Bool) {
+    init(player: Int?, rumble: Bool, gameplay: Bool = false) {
         self.player = player
         self.rumble = rumble
+        self.gameplay = gameplay
     }
 
     init?(_ data: Data) {
@@ -93,6 +97,7 @@ struct RemoteControllerStatus: Equatable {
         guard bytes.count == Self.size, bytes[0] == RemoteControllerWire.version else { return nil }
         player = bytes[1] == 0xFF ? nil : Int(bytes[1])
         rumble = bytes[2] != 0
+        gameplay = bytes[3] & 1 != 0
     }
 }
 

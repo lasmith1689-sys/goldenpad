@@ -93,7 +93,7 @@ final class RemoteControllerHost: ObservableObject {
 
     /// Called every tick by the input model on the main thread. Returns each
     /// seated phone's input, and sends any player or rumble changes back.
-    func tick(reservedPort: Int?, rumble: (Int) -> Bool) -> [RemotePlayerFrame] {
+    func tick(reservedPort: Int?, rumble: (Int) -> Bool, gameplay: (Int) -> Bool = { _ in false }) -> [RemotePlayerFrame] {
         let now = ProcessInfo.processInfo.systemUptime
         let (moved, frames, owners) = core.withMixer { mixer in
             (mixer.setReservedPort(reservedPort), mixer.drain(now: now), mixer.slots.owners)
@@ -112,7 +112,7 @@ final class RemoteControllerHost: ObservableObject {
         }
         guard started, !owners.isEmpty || !moved.isEmpty else { return frames }
         let statuses = owners.map { port, id in
-            (id, RemoteControllerStatus(player: port, rumble: rumble(port)))
+            (id, RemoteControllerStatus(player: port, rumble: rumble(port), gameplay: gameplay(port)))
         }
         let unseated = moved.filter { !owners.values.contains($0) }
         let core = core

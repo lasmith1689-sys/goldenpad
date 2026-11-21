@@ -340,6 +340,8 @@ final class RecompPrototypeInput: ObservableObject {
     private var multiplayerQuickStart: RemoteMultiplayerQuickStart?
     #endif
     private var remoteCrouchPresses: UInt8 = 0
+    private var remoteReloadPresses: UInt8 = 0
+    private var remoteReloadIsPressed = false
     private var remotePortsMask: Int32 = -1
     private var touchButtons: UInt16 = 0
     private var touchFireState = RecompTouchFireState()
@@ -605,6 +607,13 @@ final class RecompPrototypeInput: ObservableObject {
         touchCrouchIsPressed = pressed
     }
 
+    /// iPhone as a controller: the phone layout's Reload button.
+    func setRemoteReloadPressed(_ pressed: Bool) {
+        if pressed && !remoteReloadIsPressed { remoteReloadPresses &+= 1 }
+        remoteReloadIsPressed = pressed
+        publish()
+    }
+
     func toggleAim() {
         touchAimActive.toggle()
         setButton(N64.r, pressed: touchAimActive)
@@ -691,6 +700,7 @@ final class RecompPrototypeInput: ObservableObject {
             if phoneIsRemoteController {
                 var neutral = RemoteControllerInput()
                 neutral.crouchPresses = remoteCrouchPresses
+                neutral.reloadPresses = remoteReloadPresses
                 remoteClient?.send(neutral)
             }
             publishNeutralControllers()
@@ -724,6 +734,7 @@ final class RecompPrototypeInput: ObservableObject {
             frame.stick = touchMovement
             frame.look = queuedTouchLook
             frame.crouchPresses = remoteCrouchPresses
+            frame.reloadPresses = remoteReloadPresses
             remoteClient.send(frame)
             return
         }

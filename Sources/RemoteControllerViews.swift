@@ -264,7 +264,7 @@ struct RemoteControllerPadView: View {
         if let name = input.externalControllerName {
             gamepadCard(name)
         } else if client.gameplay {
-            RecompPrototypeTouchControls(input: input, placements: placements, deviceClass: deviceClass)
+            RemoteGameplayPad(input: input)
         } else {
             RemoteMenuPad(input: input)
         }
@@ -361,6 +361,85 @@ struct RemoteControllerPadView: View {
         case .lost:
             return "Lost connection to \(name)"
         }
+    }
+}
+
+/// The phone's own layout for playing a level as a controller. The phone
+/// shows no game, so the whole screen is controls, and each area does one
+/// thing: the left side is only the move stick (put your thumb down
+/// anywhere), the right side is only look (drag anywhere), and the buttons
+/// sit along the edges where they never cover either.
+struct RemoteGameplayPad: View {
+    @ObservedObject var input: RecompPrototypeInput
+
+    var body: some View {
+        GeometryReader { geometry in
+            let height = geometry.size.height
+            let big = min(height * 0.30, 112)
+            let small = min(height * 0.18, 66)
+            HStack(spacing: 10) {
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        pressButton("CROUCH", Color(red: 0.35, green: 0.35, blue: 0.40), size: small) {
+                            input.setCrouchPressed($0)
+                        }
+                        pressButton("WATCH", Color(red: 0.55, green: 0.18, blue: 0.18), size: small) {
+                            input.setButton(RecompN64Button.start, pressed: $0)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    RecompStick(title: "MOVE", symbol: "figure.walk") { input.setMovement($0) }
+                }
+                .frame(width: geometry.size.width * 0.44)
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        Spacer(minLength: 0)
+                        pressButton("RELOAD", Color(red: 0.35, green: 0.35, blue: 0.40), size: small) {
+                            input.setRemoteReloadPressed($0)
+                        }
+                        pressButton("WEAPON", Color(red: 0.55, green: 0.45, blue: 0.15), size: small) {
+                            input.setButton(RecompN64Button.a, pressed: $0)
+                        }
+                        pressButton("USE", Color(red: 0.20, green: 0.50, blue: 0.30), size: small) {
+                            input.setButton(RecompN64Button.b, pressed: $0)
+                        }
+                    }
+                    HStack(alignment: .bottom, spacing: 10) {
+                        RecompLookSurface { input.setLook($0) }
+                        VStack(spacing: 10) {
+                            aimButton(size: small * 1.15)
+                            pressButton("FIRE", Color(red: 0.75, green: 0.16, blue: 0.14), size: big) {
+                                input.setFirePressed($0, source: .primary)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func aimButton(size: CGFloat) -> some View {
+        if input.aimBehavior == .toggle {
+            RecompToggleButton(title: "AIM", tint: Color(red: 0.20, green: 0.38, blue: 0.75),
+                               activeTint: .yellow, isOn: input.touchAimActive) {
+                input.toggleAim()
+            }
+            .frame(width: size, height: size)
+        } else {
+            RecompMomentaryButton(title: "AIM", tint: Color(red: 0.20, green: 0.38, blue: 0.75), pressedTint: .yellow) {
+                input.setAimPressed($0)
+            }
+            .frame(width: size, height: size)
+        }
+    }
+
+    private func pressButton(_ title: String, _ tint: Color, size: CGFloat,
+                             _ onChange: @escaping (Bool) -> Void) -> some View {
+        RecompMomentaryButton(title: title, tint: tint, onChange: onChange)
+            .frame(width: size, height: size)
     }
 }
 

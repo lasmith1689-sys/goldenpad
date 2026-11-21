@@ -358,8 +358,8 @@ struct RemoteControllerPadView: View {
                 return "Player \(player + 1) · \(name)" + (client.gameplay ? "" : " · menus")
             }
             return "Waiting for a free player on \(name)"
-        case .lost:
-            return "Lost connection to \(name)"
+        case .lost(let reason):
+            return reason + " Retrying�"
         }
     }
 }

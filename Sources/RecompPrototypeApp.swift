@@ -291,6 +291,9 @@ struct GoldenPadApp: App {
                 case .active:
                     surface.setAppActive(true)
                     audio.activate()
+                    #if os(tvOS)
+                    remoteHost.appBecameActive()
+                    #endif
                 case .inactive:
                     // Screenshots and system overlays briefly make the scene
                     // inactive without backgrounding it. Suspending RT64 here

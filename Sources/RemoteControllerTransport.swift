@@ -44,18 +44,51 @@ final class RemoteControllerServer {
 
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
+    private var settings: (name: String?, port: NWEndpoint.Port, advertise: Bool)?
+    /// The listener is up and advertised (server queue only).
+    private(set) var isListening = false
 
     /// `name` nil uses the device's own name (for example "Living Room").
     func start(name: String? = nil, port: NWEndpoint.Port = .any, advertise: Bool = true) throws {
-        let listener = try NWListener(using: RemoteControllerNetwork.parameters(), on: port)
-        if advertise {
-            listener.service = NWListener.Service(name: name, type: RemoteControllerWire.serviceType)
+        settings = (name, port, advertise)
+        try launch()
+    }
+
+    /// Starts listening again if the listener stopped (for example after
+    /// the app was in the background, where tvOS can tear it down while
+    /// the old Bonjour advertisement lingers). Safe from any thread.
+    func restartIfNeeded(force: Bool = false) {
+        queue.async { [self] in
+            guard settings != nil, force || !isListening else { return }
+            listener?.stateUpdateHandler = nil
+            listener?.cancel()
+            listener = nil
+            isListening = false
+            do {
+                try launch()
+            } catch {
+                onFailed?("\(error)")
+            }
         }
-        listener.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
+    }
+
+    private func launch() throws {
+        guard let settings else { return }
+        let listener = try NWListener(using: RemoteControllerNetwork.parameters(), on: settings.port)
+        if settings.advertise {
+            listener.service = NWListener.Service(name: settings.name, type: RemoteControllerWire.serviceType)
+        }
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
+            guard let self, let listener, self.listener === listener else { return }
             switch state {
-            case .ready: self.onReady?(listener.port?.rawValue ?? 0)
-            case .failed(let error): self.onFailed?("\(error)")
+            case .ready:
+                self.isListening = true
+                self.onReady?(listener.port?.rawValue ?? 0)
+            case .failed(let error):
+                self.isListening = false
+                self.onFailed?("\(error)")
+            case .cancelled:
+                self.isListening = false
             default: break
             }
         }
@@ -173,18 +206,32 @@ final class RemoteControllerLink {
     var onState: ((State) -> Void)?
     var onStatus: ((RemoteControllerStatus) -> Void)?
     private let connection: NWConnection
+    private let timeout: TimeInterval
     private var ended = false
+    private var ready = false
 
-    init(endpoint: NWEndpoint) {
+    /// Reason given when the TV never answered within `timeout`.
+    static let timedOut = "timed out"
+
+    /// `timeout`: give up if the TV has not answered by then. A Bonjour
+    /// entry can outlive the TV app that made it (app closed or in the
+    /// background), and connecting to it would otherwise wait forever.
+    init(endpoint: NWEndpoint, timeout: TimeInterval = 8) {
         connection = NWConnection(to: endpoint, using: RemoteControllerNetwork.parameters())
+        self.timeout = timeout
     }
 
     func start() {
         onState?(.connecting)
+        queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
+            guard let self, !self.ready else { return }
+            self.finish(Self.timedOut)
+        }
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
+                self.ready = true
                 self.onState?(.ready)
                 RemoteControllerNetwork.receiveFrames(
                     self.connection, size: RemoteControllerStatus.size,

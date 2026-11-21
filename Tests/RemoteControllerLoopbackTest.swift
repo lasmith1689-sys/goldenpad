@@ -149,8 +149,41 @@ struct RemoteControllerLoopbackTest {
 
         phoneA.cancel()
         waitFor("TV notices phone A left") { disconnects.read { $0 } >= 2 }
+
+        // ---------- a TV that is advertised but not answering: the phone
+        // gives up instead of showing "Connecting" forever
+        let ghost = RemoteControllerLink(
+            endpoint: .service(name: "GoldenPad gone \(UUID().uuidString.prefix(8))",
+                               type: RemoteControllerWire.serviceType, domain: "local.", interface: nil),
+            timeout: 3)
+        let ghostState = Box<RemoteControllerLink.State?>(nil)
+        ghost.onState = { next in ghostState.write { $0 = next } }
+        ghost.start()
+        waitFor("a link to a TV that never answers ends") {
+            ghostState.read { if case .ended = $0 { return true }; return false }
+        }
+        print("ok: an unreachable TV ends the link (\(String(describing: ghostState.read { $0 })))")
+
+        // ---------- the TV's listener restarts (as after the app was in the
+        // background) and phones can join again
+        serverPort.write { $0 = nil }
+        server.restartIfNeeded(force: true)
+        waitFor("TV listens again after a restart") { serverPort.read { $0 != nil } }
+        let newPort = NWEndpoint.Port(rawValue: serverPort.read { $0 } ?? 0)!
+        let phoneC = RemoteControllerLink(endpoint: .hostPort(host: "127.0.0.1", port: newPort))
+        let statusC = Box([RemoteControllerStatus]())
+        let stateC = Box<RemoteControllerLink.State?>(nil)
+        phoneC.onStatus = { status in statusC.write { $0.append(status) } }
+        phoneC.onState = { next in stateC.write { $0 = next } }
+        phoneC.start()
+        waitFor("a phone connects after the restart") { stateC.read { $0 == .ready } }
+        waitFor("and is given a player") { statusC.read { $0.first?.player != nil } }
+        print("ok: after a listener restart a phone joins as Player \((statusC.read { $0.first?.player } ?? 0) + 1)")
+        phoneC.cancel()
+        waitFor("TV notices phone C left") { disconnects.read { $0 } >= 3 }
+
         server.stop()
-        print("PASS: phones found the TV, joined as players 1 and 2, sent input, got rumble, and left cleanly")
+        print("PASS: phones found the TV, joined as players 1 and 2, sent input, got rumble, and left cleanly; an unreachable TV times out; phones rejoin after the TV's listener restarts")
         exit(0)
     }
 }

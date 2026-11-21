@@ -100,16 +100,27 @@ final class RemoteControllerHost: ObservableObject {
             }
         }
         core.server.onFailed = { [weak self] message in
-            Task { @MainActor in self?.problem = "iPhones can't connect: \(message)" }
+            NSLog("[GoldenPad] remote: listener stopped (%@); restarting", message)
+            Task { @MainActor in self?.problem = "iPhones can't connect right now: \(message). Retrying…" }
+            core.server.queue.asyncAfter(deadline: .now() + 2) { core.server.restartIfNeeded() }
         }
-        core.server.onReady = { port in
+        core.server.onReady = { [weak self] port in
             NSLog("[GoldenPad] remote: listening for iPhones on port %d", Int(port))
+            Task { @MainActor in self?.problem = nil }
         }
         do {
             try core.server.start()
         } catch {
             problem = "iPhones can't connect: \(error.localizedDescription)"
         }
+    }
+
+    /// The app is in front again: tvOS may have stopped the listener while
+    /// it was in the background, so start a fresh one (phones that were
+    /// connected reconnect by themselves).
+    func appBecameActive() {
+        guard started else { return }
+        core.server.restartIfNeeded(force: true)
     }
 
     /// The gamepads paired with the TV (id -> name). They join as players in
@@ -263,6 +274,9 @@ final class RemoteControllerClient: ObservableObject {
     private var hapticTick = 0
     private var command = RemoteControllerCommand.none
     private var commandSerial: UInt8 = 0
+    /// Tries left to reach the TV again by itself after losing it.
+    private var autoRetries = 0
+    private var retryTask: Task<Void, Never>?
     #if os(iOS)
     private let haptics = UIImpactFeedbackGenerator(style: .heavy)
     #endif
@@ -291,6 +305,12 @@ final class RemoteControllerClient: ObservableObject {
     }
 
     func connect(_ tv: RemoteControllerTV) {
+        autoRetries = 15
+        open(tv)
+    }
+
+    private func open(_ tv: RemoteControllerTV) {
+        retryTask?.cancel()
         link?.cancel()
         self.tv = tv
         player = nil
@@ -304,11 +324,18 @@ final class RemoteControllerClient: ObservableObject {
             Task { @MainActor in
                 guard let self, let link, self.link === link else { return }
                 switch state {
-                case .connecting: self.phase = .connecting
-                case .ready: self.phase = .connected
+                case .connecting:
+                    if case .lost = self.phase {} else { self.phase = .connecting }
+                case .ready:
+                    self.phase = .connected
+                    self.autoRetries = 15
                 case .ended(let reason):
-                    self.phase = .lost(reason ?? "The Apple TV closed the connection.")
+                    let name = self.tv?.name ?? "the Apple TV"
+                    self.phase = .lost(reason == RemoteControllerLink.timedOut
+                        ? "Can't reach \(name). Is GoldenPad open on the Apple TV?"
+                        : (reason ?? "\(name) closed the connection."))
                     self.rumble = false
+                    self.retryLater()
                 }
             }
         }
@@ -332,7 +359,22 @@ final class RemoteControllerClient: ObservableObject {
         if let tv { connect(tv) }
     }
 
+    /// Lost the TV: try again in a few seconds (the TV app may be coming
+    /// back to the front). Uses a fresh lookup of the TV each time.
+    private func retryLater() {
+        guard autoRetries > 0, let tv else { return }
+        autoRetries -= 1
+        retryTask?.cancel()
+        retryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, !Task.isCancelled, case .lost = self.phase, self.tv == tv else { return }
+            self.open(self.tvs.first { $0.name == tv.name } ?? (self.tvs.count == 1 ? self.tvs[0] : tv))
+        }
+    }
+
     func disconnect() {
+        retryTask?.cancel()
+        autoRetries = 0
         link?.cancel()
         link = nil
         tv = nil

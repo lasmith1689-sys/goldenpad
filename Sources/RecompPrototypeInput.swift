@@ -311,6 +311,10 @@ final class RecompPrototypeInput: ObservableObject {
     @Published private(set) var touchControlsVisible = true
     /// Apple TV: some player is moving around a level (the players panel hides).
     @Published private(set) var tvGameplayActive = false
+    /// GoldenEye is drawing a level. Only levels use its 16:9 (squeezed)
+    /// picture; the front-end menus stay 4:3, so the widescreen stretch
+    /// applies only while this is true.
+    @Published private(set) var gameShowsLevel = false
     /// Apple TV: phones acting as controllers (players 1-4 beside any gamepad).
     var remoteHost: RemoteControllerHost?
     /// iPhone: when connected, the touch controls drive an Apple TV instead.
@@ -320,6 +324,7 @@ final class RecompPrototypeInput: ObservableObject {
     private var phoneGamepadReader = RecompGamepadReader()
     #if os(tvOS)
     /// Apple TV: every paired gamepad is a player of its own, like a phone.
+    @MainActor
     private final class TVGamepad {
         let id = UUID()
         let controller: GCController
@@ -675,6 +680,11 @@ final class RecompPrototypeInput: ObservableObject {
     }
 
     private func publish() {
+        var frontMenu: Int32 = -1
+        var frontCursor: Float = 0
+        let showsLevel = goldenPadRecompFrontState(&frontMenu, &frontCursor) != 0 &&
+            frontMenu == Int32(RemoteMultiplayerQuickStart.Screen.level)
+        if gameShowsLevel != showsLevel { gameShowsLevel = showsLevel }
         if hostInputSuspended {
             touchLook = .zero
             controllerRumble.update(active: false)

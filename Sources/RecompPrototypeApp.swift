@@ -476,12 +476,14 @@ struct GoldenPadApp: App {
         } else if (RecompPrototypeAspectMode(rawValue: aspectMode) ?? .widescreen) == .widescreen {
             // GoldenEye's own 16:9 mode draws a horizontally squeezed picture
             // into its 4:3 frame (for widescreen TVs). Render that 4:3 frame
-            // and stretch it 4:3 -> 16:9, the way a widescreen TV did.
+            // and stretch it 4:3 -> 16:9, the way a widescreen TV did, but
+            // only in levels: the front-end menus are drawn 4:3 and would
+            // look stretched, so they stay 4:3 in the middle.
             GeometryReader { geometry in
                 let height = min(geometry.size.height, geometry.size.width * 9.0 / 16.0)
                 canvas
                     .frame(width: height * 4.0 / 3.0, height: height)
-                    .scaleEffect(x: 4.0 / 3.0, y: 1)
+                    .scaleEffect(x: input.gameShowsLevel ? 4.0 / 3.0 : 1, y: 1)
                     .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .clipped()

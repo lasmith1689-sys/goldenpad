@@ -2433,6 +2433,23 @@ extern "C" int32_t goldenpad_recomp_frontend_input_active() {
     return readGameWord(rdram, 0x80023FA8) == kTitleStage ? 1 : 0;
 }
 
+// Apple TV "Start multiplayer": GoldenEye's front-end screen
+// (current_menu, the MENU enum: 0-4 intro screens, 5 file select, 6 mode
+// select, 11 a level, 14+ multiplayer setup) and the mode-select cursor's
+// vertical position (Multiplayer is at 243 and below the cheats at 275).
+// Returns 0 while the game is not running.
+extern "C" int32_t goldenpad_recomp_front_state(int32_t *menuOut, float *cursorVOut) {
+    uint8_t *rdram = activeRdram.load(std::memory_order_acquire);
+    if (!runtimeStarted.load(std::memory_order_relaxed) || rdram == nullptr) {
+        return 0;
+    }
+    constexpr uint32_t kCurrentMenuAddress = 0x8002A6C0;
+    constexpr uint32_t kCursorVPosAddress = 0x8002A70C;
+    if (menuOut != nullptr) { *menuOut = readGameWord(rdram, kCurrentMenuAddress); }
+    if (cursorVOut != nullptr) { *cursorVOut = readGameFloat(rdram, kCursorVPosAddress); }
+    return 1;
+}
+
 extern "C" int32_t goldenpad_recomp_gameplay_input_active() {
     const auto reportMode = [](int32_t active) {
         const int32_t previous = gameplayInputModeReported.exchange(

@@ -20,6 +20,9 @@ private func goldenPadRecompSetRightAnalog(_ controller: Int32, _ x: Int32, _ y:
 @_silgen_name("goldenpad_recomp_set_controller_connected")
 private func goldenPadRecompSetControllerConnected(_ connected: Int32)
 
+@_silgen_name("goldenpad_recomp_front_state")
+private func goldenPadRecompFrontState(_ menu: UnsafeMutablePointer<Int32>, _ cursorV: UnsafeMutablePointer<Float>) -> Int32
+
 @_silgen_name("goldenpad_recomp_set_remote_ports")
 private func goldenPadRecompSetRemotePorts(_ mask: Int32)
 
@@ -306,11 +309,31 @@ final class RecompPrototypeInput: ObservableObject {
     @Published private(set) var twoPlayerTestModeActive = false
     @Published private(set) var fourPlayerTestModeActive = false
     @Published private(set) var touchControlsVisible = true
+    /// Apple TV: some player is moving around a level (the players panel hides).
+    @Published private(set) var tvGameplayActive = false
     /// Apple TV: phones acting as controllers (players 1-4 beside any gamepad).
     var remoteHost: RemoteControllerHost?
     /// iPhone: when connected, the touch controls drive an Apple TV instead.
     var remoteClient: RemoteControllerClient?
     private let ignoreLocalGamepads = ProcessInfo.processInfo.arguments.contains("--ignore-tv-gamepads")
+    /// iPhone as a controller: reads a gamepad held in or paired with the phone.
+    private var phoneGamepadReader = RecompGamepadReader()
+    #if os(tvOS)
+    /// Apple TV: every paired gamepad is a player of its own, like a phone.
+    private final class TVGamepad {
+        let id = UUID()
+        let controller: GCController
+        var reader = RecompGamepadReader()
+        let rumble = RecompControllerRumble()
+        init(_ controller: GCController) {
+            self.controller = controller
+            rumble.attach(controller)
+        }
+    }
+    private var tvGamepads: [TVGamepad] = []
+    private var tvFullTiltStartedAt: [Int: CFTimeInterval] = [:]
+    private var multiplayerQuickStart: RemoteMultiplayerQuickStart?
+    #endif
     private var remoteCrouchPresses: UInt8 = 0
     private var remotePortsMask: Int32 = -1
     private var touchButtons: UInt16 = 0
@@ -620,8 +643,14 @@ final class RecompPrototypeInput: ObservableObject {
         let previousController = controller
         // (--ignore-tv-gamepads: the simulator test needs its scripted phone
         // to be Player 1, and the tvOS simulator reports a gamepad of its own)
-        let availableControllers = ignoreLocalGamepads ? [] :
+        var availableControllers = ignoreLocalGamepads ? [] :
             GCController.controllers().filter { $0.extendedGamepad != nil }
+        #if os(tvOS)
+        let kept = tvGamepads.filter { pad in availableControllers.contains { $0 === pad.controller } }
+        let added = availableControllers.filter { controller in !kept.contains { $0.controller === controller } }
+        tvGamepads = kept + added.map(TVGamepad.init)
+        availableControllers = []
+        #endif
         if let previousController,
            availableControllers.contains(where: { $0 === previousController }) {
             controller = previousController
@@ -666,7 +695,18 @@ final class RecompPrototypeInput: ObservableObject {
 
         let queuedTouchLook = clamp(touchLook * lookSensitivity)
         touchLook = .zero
+        #if os(tvOS)
+        publishTV()
+        return
+        #else
         if phoneIsRemoteController, let remoteClient {
+            if let gamepad = controller?.extendedGamepad {
+                // A gamepad held in or paired with this iPhone: send it as a
+                // gamepad, and the TV shapes it like one paired with the TV.
+                controllerRumble.update(active: controllerRumbleEnabled && remoteClient.rumble)
+                remoteClient.send(phoneGamepadReader.read(gamepad, mapping: controllerMapping))
+                return
+            }
             // This iPhone is a controller for an Apple TV: the touch controls
             // go there raw, and the TV maps them like its own touch input.
             var frame = RemoteControllerInput()
@@ -677,6 +717,7 @@ final class RecompPrototypeInput: ObservableObject {
             remoteClient.send(frame)
             return
         }
+        #endif
         var externalButtons: UInt16 = 0
         var externalStick = SIMD2<Float>.zero
         var controllerLook = SIMD2<Float>.zero
@@ -799,11 +840,7 @@ final class RecompPrototypeInput: ObservableObject {
 
         let route = ownershipRoute
         let gameplayActive = goldenPadRecompGameplayInputActive() != 0
-        let remoteFrames = remoteHost?.tick(
-            reservedPort: route.externalPort.map(Int.init),
-            rumble: { goldenPadRecompGetRumble(Int32($0)) != 0 },
-            gameplay: { self.runtimeInputContext(port: Int32($0)).gameplayActive }
-        ) ?? []
+        let remoteFrames: [RemotePlayerFrame] = []
         var remoteByPort: [Int32: RemotePlayerFrame] = [:]
         var nextRemoteMask: Int32 = 0
         for frame in remoteFrames {
@@ -1002,6 +1039,15 @@ final class RecompPrototypeInput: ObservableObject {
         fullTilt: Bool,
         aiming: Bool
     ) -> SIMD2<Float> {
+        shapedLook(look, fullTilt: fullTilt, aiming: aiming, startedAt: &fullTiltStartedAt)
+    }
+
+    private func shapedLook(
+        _ look: SIMD2<Float>,
+        fullTilt: Bool,
+        aiming: Bool,
+        startedAt fullTiltStartedAt: inout CFTimeInterval?
+    ) -> SIMD2<Float> {
         guard look != .zero else {
             fullTiltStartedAt = nil
             return .zero
@@ -1022,6 +1068,177 @@ final class RecompPrototypeInput: ObservableObject {
         }
         return SIMD2(look.x * controllerLookSpeed * boost, look.y * controllerLookSpeed)
     }
+
+    #if os(tvOS)
+    /// Apple TV: every player is a phone (touch or a gamepad it forwards) or
+    /// a gamepad paired with the TV, all seated by the remote host. Each
+    /// player's frame is shaped by kind and sent to its own port; GoldenEye's
+    /// per-player state decides menus versus gameplay for that player.
+    private func publishTV() {
+        guard let remoteHost else {
+            publishNeutralControllers()
+            return
+        }
+        remoteHost.setLocalGamepads(Dictionary(uniqueKeysWithValues: tvGamepads.map {
+            ($0.id, $0.controller.vendorName ?? "Controller")
+        }))
+        var localInput: [UUID: RemoteControllerInput] = [:]
+        for pad in tvGamepads {
+            if let gamepad = pad.controller.extendedGamepad {
+                localInput[pad.id] = pad.reader.read(gamepad, mapping: controllerMapping)
+            }
+        }
+        var contexts: [Int: RecompRuntimeInputContext] = [:]
+        func context(_ port: Int) -> RecompRuntimeInputContext {
+            if let known = contexts[port] { return known }
+            let next = runtimeInputContext(port: Int32(port))
+            contexts[port] = next
+            return next
+        }
+        let frames = remoteHost.tick(
+            localInput: localInput,
+            rumble: { goldenPadRecompGetRumble(Int32($0)) != 0 },
+            gameplay: { context($0).gameplayActive }
+        )
+        for pad in tvGamepads {
+            let port = frames.first { remoteHost.holder(of: $0.port) == pad.id }?.port
+            pad.rumble.update(active: controllerRumbleEnabled && port.map { goldenPadRecompGetRumble(Int32($0)) != 0 } ?? false)
+        }
+
+        var byPort: [Int: RemotePlayerFrame] = [:]
+        var mask: Int32 = 0
+        for frame in frames {
+            byPort[frame.port] = frame
+            mask |= Int32(1) << Int32(frame.port)
+            if frame.crouchPresses % 2 == 1 { goldenPadRecompRequestCrouchToggle(Int32(frame.port)) }
+            if frame.reloadPresses > 0 { goldenPadRecompRequestReload(Int32(frame.port)) }
+        }
+        if mask != remotePortsMask {
+            remotePortsMask = mask
+            goldenPadRecompSetRemotePorts(mask)
+        }
+
+        // "Start multiplayer": drive Player 1 through GoldenEye's menus.
+        if remoteHost.takeMultiplayerRequest() {
+            multiplayerQuickStart = RemoteMultiplayerQuickStart()
+            remoteHost.compactPlayers()
+            remoteHost.startingMultiplayer = true
+            NSLog("[GoldenPad] remote: start multiplayer requested with %d players", frames.count)
+        }
+        var playerOneOverride: RemoteMultiplayerQuickStart.Press?
+        if var quickStart = multiplayerQuickStart {
+            var menu: Int32 = -1
+            var cursor: Float = 0
+            let running = goldenPadRecompFrontState(&menu, &cursor) != 0
+            let step = quickStart.step(screen: running ? Int(menu) : nil, cursor: cursor, players: frames.count)
+            if step.returnToTitle { goldenPadRecompRequestReturnToTitle() }
+            playerOneOverride = step.press
+            switch quickStart.outcome {
+            case .running:
+                multiplayerQuickStart = quickStart
+            case .done:
+                multiplayerQuickStart = nil
+                remoteHost.startingMultiplayer = false
+                remoteHost.show("Multiplayer setup: Player 1 chooses the game")
+            case .failed(let reason):
+                multiplayerQuickStart = nil
+                remoteHost.startingMultiplayer = false
+                remoteHost.show(reason)
+            }
+        }
+
+        var playerOneStyle: Int32 = -1
+        for port in 0..<RemoteControllerWire.maxPlayers {
+            let resolvedPort = Int32(port)
+            if port == 0, let press = playerOneOverride {
+                publishController(port: 0, buttons: press.buttons, stick: press.stick, look: .zero)
+                continue
+            }
+            guard let frame = byPort[port] else {
+                publishController(port: resolvedPort, buttons: 0, stick: .zero, look: .zero)
+                continue
+            }
+            let playerContext = context(port)
+            if port == 0 { playerOneStyle = playerContext.gameplayActive ? playerContext.runtimeStyle : -1 }
+            switch frame.kind {
+            case .touch:
+                if playerContext.gameplayActive {
+                    let movement = remoteGameplayMovement(frame)
+                    publishController(port: resolvedPort, buttons: movement.buttons, stick: movement.stick, look: .zero)
+                } else {
+                    publishController(port: resolvedPort, buttons: frame.buttons, stick: frame.stick, look: .zero)
+                }
+                if frame.look != .zero { publishTouchLook(clamp(frame.look), port: resolvedPort) }
+            case .gamepad:
+                publishGamepadFrame(frame, context: playerContext)
+            }
+        }
+        if activeControlStyle != playerOneStyle { activeControlStyle = playerOneStyle }
+        let anyGameplay = byPort.keys.contains { context($0).gameplayActive }
+        if tvGameplayActive != anyGameplay { tvGameplayActive = anyGameplay }
+    }
+
+    /// A gamepad player on the TV (paired with the TV or forwarded by a
+    /// phone), shaped exactly like GoldenPad's own gamepad on iPhone: modern
+    /// dual-stick look with a dead zone, curve, aim speed and full-tilt
+    /// boost; the left stick steers the sight while aiming.
+    private func publishGamepadFrame(_ frame: RemotePlayerFrame, context: RecompRuntimeInputContext) {
+        let port = frame.port
+        let fire = frame.buttons & N64.z != 0
+        let aim = frame.buttons & N64.r != 0
+        let action = frame.buttons & N64.b != 0
+        let weapon = frame.buttons & N64.a != 0
+        var buttons = frame.buttons & (N64.start | N64.dpadUp | N64.dpadDown | N64.dpadLeft | N64.dpadRight)
+        var look = frame.look.applyingRadialDeadZone(0.15).applyingResponseCurve(1.5)
+        let fullTilt = abs(frame.look.x) >= 0.9
+        switch controllerLookMode {
+        case .analog:
+            break
+        case .classic:
+            let threshold: Float = 0.30
+            if look.y > threshold { buttons |= N64.cUp }
+            if look.y < -threshold { buttons |= N64.cDown }
+            if look.x < -threshold { buttons |= N64.cLeft }
+            if look.x > threshold { buttons |= N64.cRight }
+            look = .zero
+        case .off:
+            look = .zero
+        }
+        guard context.gameplayActive else {
+            tvFullTiltStartedAt[port] = nil
+            if fire { buttons |= N64.z }
+            if aim { buttons |= N64.r }
+            if action { buttons |= N64.b }
+            if weapon { buttons |= N64.a }
+            publishController(port: Int32(port), buttons: buttons, stick: frame.stick, look: look)
+            return
+        }
+        var playerContext = context
+        playerContext.aiming = playerContext.aiming || aim
+        let mapping = RecompControlMapping(runtimeStyle: playerContext.runtimeStyle)
+        buttons |= mapping.gameplayButtons(
+            fire: fire, aim: aim, action: action, weapon: weapon, start: buttons & N64.start != 0)
+        var movement = mapping.movement(
+            buttons: buttons,
+            stick: frame.stick,
+            modern: controllerLookMode == .analog,
+            context: playerContext)
+        var publishedLook = look
+        if controllerLookMode == .analog {
+            var startedAt = tvFullTiltStartedAt[port]
+            publishedLook = shapedLook(
+                look, fullTilt: fullTilt,
+                aiming: playerContext.aiming && !playerContext.isInTank,
+                startedAt: &startedAt)
+            tvFullTiltStartedAt[port] = startedAt
+            if let manualAimStick = mapping.manualAimStick(
+                stick: frame.stick, invertVertical: invertAimY, context: playerContext) {
+                movement.stick = manualAimStick
+            }
+        }
+        publishController(port: Int32(port), buttons: movement.buttons, stick: movement.stick, look: publishedLook)
+    }
+    #endif
 
     private var inactiveInputContext: RecompRuntimeInputContext {
         RecompRuntimeInputContext(

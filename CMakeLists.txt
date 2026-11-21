@@ -578,6 +578,8 @@ if(GOLDENPAD_RECOMP_PROTOTYPE)
         Sources/RemoteControllerSession.swift
         Sources/RemoteControllerTransport.swift
         Sources/RemoteControllerViews.swift
+        Sources/RemoteControllerGamepad.swift
+        Sources/RemoteMultiplayerQuickStart.swift
         Sources/GoldenPadSaveMirror.swift
         Sources/GoldenPadCrashReport.swift
         Support/RecompPrototype/goldenpad_crash_capture.cpp

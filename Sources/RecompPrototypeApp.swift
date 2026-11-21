@@ -189,7 +189,7 @@ struct GoldenPadApp: App {
                 #if os(tvOS)
                 RemoteControllerTVOverlay(
                     host: remoteHost,
-                    hasGamepad: input.externalControllerName != nil
+                    inGameplay: input.tvGameplayActive
                 )
                 #endif
                 GeometryReader { geometry in

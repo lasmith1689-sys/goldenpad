@@ -20,7 +20,8 @@ jobs:
       - name: Message format, player slots and input mixing
         run: |
           swiftc --version
-          swiftc -O Sources/RemoteControllerProtocol.swift Tests/RemoteControllerProtocolTests.swift \
+          swiftc -O Sources/RemoteControllerProtocol.swift Sources/RemoteMultiplayerQuickStart.swift \
+            Tests/RemoteControllerProtocolTests.swift \
             -parse-as-library -o "$RUNNER_TEMP/remote-controller-tests"
           "$RUNNER_TEMP/remote-controller-tests"
       - name: Apple TV save mirror survives a cleared Caches folder
@@ -56,6 +57,7 @@ jobs:
             Sources/RecompPrototypeInput.swift Sources/LANNetplayCoordinator.swift Sources/LANNetplayProtocol.swift
             Sources/RemoteControllerProtocol.swift Sources/RemoteControllerSession.swift
             Sources/RemoteControllerTransport.swift Sources/RemoteControllerViews.swift
+            Sources/RemoteControllerGamepad.swift Sources/RemoteMultiplayerQuickStart.swift
             Sources/GoldenPadSaveMirror.swift Sources/GoldenPadCrashReport.swift
             Sources/RecompPrototypeMetalCanvas.swift Sources/RecompPrototypeROMStore.swift
             Sources/RecompTouchFireState.swift Sources/RecompPrototypeTouchLayout.swift"

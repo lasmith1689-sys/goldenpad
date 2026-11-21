@@ -28,22 +28,40 @@ private final class RemoteControllerHostCore: @unchecked Sendable {
     func forget(_ id: UUID) { sent[id] = nil }
 }
 
+/// One player on the TV, for the players panel.
+struct RemoteSeat: Equatable, Identifiable {
+    enum Device: Equatable {
+        /// A phone using its touch controls.
+        case phoneTouch
+        /// A phone forwarding a gamepad held in or paired with it.
+        case phoneGamepad
+        /// A gamepad paired with the Apple TV itself.
+        case tvGamepad(String)
+    }
+    let port: Int
+    let device: Device
+    var id: Int { port }
+}
+
 /// Apple TV side of "use your iPhone as a controller": listens for phones,
-/// seats each as player 1-4 and hands the input model one frame per player
-/// per tick. A game controller paired with the TV keeps player 1.
+/// seats phones and the TV's own gamepads as players 1-4 in the order they
+/// arrive, lets any of them swap players, and hands the input model one
+/// frame per player per tick.
 @MainActor
 final class RemoteControllerHost: ObservableObject {
-    /// Players held by phones, 0-based, sorted.
-    @Published private(set) var players: [Int] = []
+    /// Who holds each player, sorted by player.
+    @Published private(set) var seats: [RemoteSeat] = []
     @Published private(set) var waitingCount = 0
     /// Short notice for the TV screen, such as "iPhone joined as Player 2".
     @Published private(set) var notice: String?
     @Published private(set) var problem: String?
+    /// Set while the TV drives GoldenEye's menus to the multiplayer screen.
+    @Published var startingMultiplayer = false
 
     private let core = RemoteControllerHostCore()
     private var started = false
     private var loggedButtons: [Int: UInt16] = [:]
-    private var loggedReservedPort: Int?? = .none
+    private var localGamepads: [UUID: String] = [:]
     private var noticeTask: Task<Void, Never>?
 
     func start() {
@@ -54,27 +72,30 @@ final class RemoteControllerHost: ObservableObject {
             let player = core.withMixer { $0.connect(id) }
             core.sendStatus(RemoteControllerStatus(player: player, rumble: false), to: id)
             Task { @MainActor in
-                self?.refreshPlayers()
+                self?.refreshSeats()
                 self?.show(player.map { "iPhone joined as Player \($0 + 1)" }
                     ?? "An iPhone is waiting: all four players are taken")
             }
         }
-        core.server.onInput = { id, input in
+        core.server.onInput = { [weak self] id, input in
             let now = ProcessInfo.processInfo.systemUptime
-            core.withMixer { $0.receive(input, from: id, now: now) }
+            let changed = core.withMixer { $0.receive(input, from: id, now: now) }
+            guard !changed.isEmpty else { return }
+            let port = core.withMixer { $0.port(of: id) }
+            Task { @MainActor in
+                self?.refreshSeats()
+                if let port { self?.show("An iPhone moved to Player \(port + 1)") }
+            }
         }
         core.server.onDisconnect = { [weak self] id in
-            let (port, seated) = core.withMixer { mixer -> (Int?, [(UUID, Int?)]) in
+            let port = core.withMixer { mixer -> Int? in
                 let port = mixer.port(of: id)
-                let seated = mixer.disconnect(id)
-                return (port, seated.map { ($0, mixer.port(of: $0)) })
+                mixer.disconnect(id)
+                return port
             }
             core.forget(id)
-            for (phone, player) in seated {
-                core.sendStatus(RemoteControllerStatus(player: player, rumble: false), to: phone)
-            }
             Task { @MainActor in
-                self?.refreshPlayers()
+                self?.refreshSeats()
                 if let port { self?.show("Player \(port + 1)'s iPhone left") }
             }
         }
@@ -91,47 +112,117 @@ final class RemoteControllerHost: ObservableObject {
         }
     }
 
-    /// Called every tick by the input model on the main thread. Returns each
-    /// seated phone's input, and sends any player or rumble changes back.
-    func tick(reservedPort: Int?, rumble: (Int) -> Bool, gameplay: (Int) -> Bool = { _ in false }) -> [RemotePlayerFrame] {
-        let now = ProcessInfo.processInfo.systemUptime
-        let (moved, frames, owners) = core.withMixer { mixer in
-            (mixer.setReservedPort(reservedPort), mixer.drain(now: now), mixer.slots.owners)
+    /// The gamepads paired with the TV (id -> name). They join as players in
+    /// arrival order, like phones.
+    func setLocalGamepads(_ gamepads: [UUID: String]) {
+        guard gamepads != localGamepads else { return }
+        let joined = gamepads.keys.filter { localGamepads[$0] == nil }
+        let left = localGamepads.keys.filter { gamepads[$0] == nil }
+        localGamepads = gamepads
+        let notices = core.withMixer { mixer -> [String] in
+            var notices: [String] = []
+            for id in left {
+                if let port = mixer.port(of: id) { notices.append("Player \(port + 1)'s controller disconnected") }
+                mixer.disconnect(id)
+            }
+            for id in joined {
+                let port = mixer.connect(id, localGamepad: true)
+                notices.append(port.map { "\(gamepads[id] ?? "Controller") joined as Player \($0 + 1)" }
+                    ?? "A controller is waiting: all four players are taken")
+            }
+            return notices
         }
-        if !moved.isEmpty { refreshPlayers() }
-        if loggedReservedPort != .some(reservedPort) {
-            loggedReservedPort = .some(reservedPort)
-            NSLog("[GoldenPad] remote: %@", reservedPort == nil
-                ? "no game controller on the TV; phones start at Player 1"
-                : "a game controller on the TV holds Player 1; phones start at Player 2")
+        refreshSeats()
+        if let last = notices.last { show(last) }
+    }
+
+    /// Moves a player to another player number (from the TV's players
+    /// panel), swapping with whoever has it.
+    func swap(_ port: Int, with other: Int) {
+        core.withMixer { mixer in
+            if let id = mixer.slots.owners[port] { mixer.seat(id, at: other) }
+        }
+        refreshSeats()
+        show("Player \(port + 1) and Player \(other + 1) swapped places")
+    }
+
+    /// The controller holding `port`, if any.
+    func holder(of port: Int) -> UUID? {
+        core.withMixer { $0.slots.owners[port] }
+    }
+
+    /// Closes gaps between players before multiplayer (GoldenEye stops
+    /// counting controllers at the first empty port).
+    func compactPlayers() {
+        let changed = core.withMixer { $0.compact() }
+        if !changed.isEmpty { refreshSeats() }
+    }
+
+    /// True once after a phone asked to start multiplayer.
+    func takeMultiplayerRequest() -> Bool {
+        core.withMixer { $0.takeMultiplayerRequest() }
+    }
+
+    /// Called every tick by the input model on the main thread with this
+    /// tick's input from the TV's own gamepads. Returns every seated
+    /// player's input, and sends phones any status change.
+    func tick(
+        localInput: [UUID: RemoteControllerInput],
+        rumble: (Int) -> Bool,
+        gameplay: (Int) -> Bool
+    ) -> [RemotePlayerFrame] {
+        let now = ProcessInfo.processInfo.systemUptime
+        let (frames, owners, phones, kinds) = core.withMixer {
+            mixer -> ([RemotePlayerFrame], [Int: UUID], Set<UUID>, [UUID: RemoteControllerKind]) in
+            for (id, input) in localInput { mixer.receive(input, from: id, now: now) }
+            let phones = Set(mixer.slots.owners.values.filter { !mixer.isLocalGamepad($0) })
+            var kinds: [UUID: RemoteControllerKind] = [:]
+            for id in phones { kinds[id] = mixer.latestKind(of: id) }
+            return (mixer.drain(now: now), mixer.slots.owners, phones, kinds)
         }
         for frame in frames where loggedButtons[frame.port] != frame.buttons {
             // (a few lines per press; the CI simulator test reads these)
             loggedButtons[frame.port] = frame.buttons
             NSLog("[GoldenPad] remote: player %d buttons 0x%04x", frame.port + 1, frame.buttons)
         }
-        guard started, !owners.isEmpty || !moved.isEmpty else { return frames }
-        let statuses = owners.map { port, id in
-            (id, RemoteControllerStatus(player: port, rumble: rumble(port), gameplay: gameplay(port)))
+        if kinds != phoneKinds {
+            phoneKinds = kinds
+            refreshSeats()
         }
-        let unseated = moved.filter { !owners.values.contains($0) }
+        guard started else { return frames }
+        let count = owners.count
+        let multiplayer = startingMultiplayer
+        let statuses = owners.compactMap { port, id -> (UUID, RemoteControllerStatus)? in
+            guard phones.contains(id) else { return nil }
+            return (id, RemoteControllerStatus(
+                player: port, rumble: rumble(port), gameplay: gameplay(port),
+                startingMultiplayer: multiplayer, playerCount: count))
+        }
         let core = core
         core.server.queue.async {
             for (id, status) in statuses { core.sendStatus(status, to: id) }
-            for id in unseated {
-                core.sendStatus(RemoteControllerStatus(player: nil, rumble: false), to: id)
-            }
         }
         return frames
     }
 
-    private func refreshPlayers() {
-        let (ports, waiting) = core.withMixer { ($0.slots.occupiedPorts, $0.connectedCount - $0.slots.occupiedPorts.count) }
-        if ports != players { players = ports }
+    private var phoneKinds: [UUID: RemoteControllerKind] = [:]
+
+    private func refreshSeats() {
+        let names = localGamepads
+        let (next, waiting) = core.withMixer { mixer -> ([RemoteSeat], Int) in
+            let seats = mixer.slots.owners.sorted { $0.key < $1.key }.map { port, id -> RemoteSeat in
+                if mixer.isLocalGamepad(id) {
+                    return RemoteSeat(port: port, device: .tvGamepad(names[id] ?? "Controller"))
+                }
+                return RemoteSeat(port: port, device: mixer.latestKind(of: id) == .gamepad ? .phoneGamepad : .phoneTouch)
+            }
+            return (seats, mixer.connectedCount - seats.count)
+        }
+        if next != seats { seats = next }
         if waiting != waitingCount { waitingCount = waiting }
     }
 
-    private func show(_ message: String) {
+    func show(_ message: String) {
         NSLog("[GoldenPad] remote: %@", message)
         notice = message
         noticeTask?.cancel()
@@ -159,11 +250,19 @@ final class RemoteControllerClient: ObservableObject {
     /// 0-based player the TV gave this phone; nil while waiting for one.
     @Published private(set) var player: Int?
     @Published private(set) var rumble = false
+    /// This phone's player is moving around a level (not in menus).
+    @Published private(set) var gameplay = false
+    /// Players seated on the TV, counting this phone.
+    @Published private(set) var playerCount = 0
+    /// The TV is taking the game to the multiplayer screen.
+    @Published private(set) var startingMultiplayer = false
     @Published private(set) var browseProblem: String?
 
     private var browser: RemoteControllerBrowser?
     private var link: RemoteControllerLink?
     private var hapticTick = 0
+    private var command = RemoteControllerCommand.none
+    private var commandSerial: UInt8 = 0
     #if os(iOS)
     private let haptics = UIImpactFeedbackGenerator(style: .heavy)
     #endif
@@ -196,6 +295,10 @@ final class RemoteControllerClient: ObservableObject {
         self.tv = tv
         player = nil
         rumble = false
+        gameplay = false
+        playerCount = 0
+        startingMultiplayer = false
+        command = RemoteControllerCommand.none
         let link = RemoteControllerLink(endpoint: tv.endpoint)
         link.onState = { [weak self, weak link] state in
             Task { @MainActor in
@@ -211,8 +314,14 @@ final class RemoteControllerClient: ObservableObject {
         }
         link.onStatus = { [weak self] status in
             Task { @MainActor in
-                self?.player = status.player
-                self?.rumble = status.rumble
+                guard let self else { return }
+                self.player = status.player
+                self.rumble = status.rumble
+                if self.gameplay != status.gameplay { self.gameplay = status.gameplay }
+                if self.playerCount != status.playerCount { self.playerCount = status.playerCount }
+                if self.startingMultiplayer != status.startingMultiplayer {
+                    self.startingMultiplayer = status.startingMultiplayer
+                }
             }
         }
         self.link = link
@@ -233,7 +342,25 @@ final class RemoteControllerClient: ObservableObject {
     }
 
     /// Called by the input model every tick while connected.
+    /// Asks the TV to make this phone player `port` (swapping with whoever has it).
+    func requestPlayer(_ port: Int) {
+        issue(RemoteControllerCommand.becomePlayer(port))
+    }
+
+    /// Asks the TV to take GoldenEye's menus to the multiplayer screen.
+    func requestMultiplayer() {
+        issue(RemoteControllerCommand.startMultiplayer)
+    }
+
+    private func issue(_ next: UInt8) {
+        command = next
+        commandSerial &+= 1
+    }
+
     func send(_ input: RemoteControllerInput) {
+        var input = input
+        input.command = command
+        input.commandSerial = commandSerial
         link?.send(input)
         #if os(iOS)
         // GoldenEye pulses the Rumble Pak motor; buzz about 20 times a second.

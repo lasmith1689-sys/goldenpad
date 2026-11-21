@@ -51,6 +51,7 @@ extern "C" void goldenpad_recomp_performance_counters(
 extern "C" void goldenpad_recomp_note_audio_host_rates(uint32_t, uint32_t, uint32_t) {}
 extern "C" int32_t goldenpad_recomp_frontend_input_active() { return 1; }
 extern "C" int32_t goldenpad_recomp_gameplay_input_active() { return 0; }
+extern "C" int32_t goldenpad_recomp_front_state(int32_t *, float *) { return 0; }
 extern "C" void goldenpad_recomp_get_input_context(
     int32_t, int32_t *gameplay, int32_t *style, int32_t *aiming,
     int32_t *tankState, int32_t *nativeLookUpright) {
